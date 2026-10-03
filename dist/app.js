@@ -13,6 +13,9 @@ const freshSession = () => ({ nowPlaying: null, queue: structuredClone(demoQueue
 const app = document.querySelector('#app');
 let state = freshSession();
 let selectedSong = null;
+let selectedTableNumber = '';
+let selectedSingerName = '';
+let searchState = { query: '', pageSize: 10, page: 1, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
 let saveTimer = null;
 let firebaseDb = null;
 let firebaseReady = false;
@@ -355,36 +358,106 @@ function nav(active, display = false) {
   return `<header class="topbar"><a class="brand" href="#waiter"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</a><span class="top-meta"><span class="live-dot"></span>Firebase ${firebaseReady ? 'activo' : 'local'}</span></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}<span>Mesero</span></a><a class="${active === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a><a class="${active === 'display' ? 'active' : ''}" href="#display">${icon('tv')}<span>Pantalla TV</span></a></nav>`;
 }
 function waiterView() {
-  return `<div class="shell">${nav('waiter')}<main class="page"><div class="page-head"><div><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Agrega una canción</h1><p>Busca una versión, confirma la mesa y deja que la música siga.</p></div><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span></div><section class="card search-card" style="padding:22px"><div class="eyebrow">BUSCAR EN YOUTUBE</div><div class="search" style="margin-top:12px"><input id="search-input" class="input" placeholder="Artista o canción…"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error"></div><div id="results" class="results"></div></section><div id="selection"></div></main></div>`;
+  return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
 }
 function renderResults(results) {
   const node = document.querySelector('#results');
   if (!node) return;
-  node.innerHTML = results.length ? results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt=""/><div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">Elegir</button></div></article>`).join('') : '<div class="empty">No encontramos resultados.</div>';
-  node.querySelectorAll('.choose-song').forEach((button) => button.addEventListener('click', () => { selectedSong = JSON.parse(button.dataset.song); renderSelection(); }));
+  if (!results.length) {
+    node.innerHTML = searchState.query ? '<div class="empty">No encontramos resultados para esta búsqueda.</div>' : '';
+    return;
+  }
+  const firstResult = ((searchState.page - 1) * searchState.pageSize) + 1;
+  const lastResult = firstResult + results.length - 1;
+  const total = searchState.totalResults ? ` de ${searchState.totalResults.toLocaleString('es-PE')}` : '';
+  node.innerHTML = `<div class="results-toolbar"><div><strong>${firstResult}–${lastResult}${total}</strong><span class="muted"> · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
+  node.querySelectorAll('.choose-song').forEach((button) => button.addEventListener('click', () => openSongModal(JSON.parse(button.dataset.song))));
+  node.querySelector('#page-size')?.addEventListener('change', (event) => {
+    searchState.pageSize = Number(event.target.value);
+    searchYoutube({ pageToken: '', pageNumber: 1 });
+  });
+  node.querySelector('#previous-page')?.addEventListener('click', () => searchYoutube({ pageToken: searchState.prevPageToken, pageNumber: Math.max(1, searchState.page - 1) }));
+  node.querySelector('#next-page')?.addEventListener('click', () => searchYoutube({ pageToken: searchState.nextPageToken, pageNumber: searchState.page + 1 }));
+}
+function formatIsoDuration(value) {
+  const match = String(value ?? '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
+  if (!match) return 'Duración no disponible';
+  return `Duración ${formatTime((Number(match[1]) || 0) * 3600 + (Number(match[2]) || 0) * 60 + (Number(match[3]) || 0))}`;
+}
+function formatSelectedTable(value) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= 100 ? String(numeric).padStart(2, '0') : String(value || '');
+}
+function tableOptionsMarkup() {
+  return Array.from({ length: 100 }, (_, index) => {
+    const tableNumber = String(index + 1).padStart(2, '0');
+    return `<button type="button" class="table-choice ${selectedTableNumber === String(index + 1) ? 'selected' : ''}" data-table="${index + 1}">${tableNumber}</button>`;
+  }).join('');
+}
+function syncSelectionModal() {
+  document.querySelectorAll('.table-choice').forEach((button) => button.classList.toggle('selected', button.dataset.table === selectedTableNumber));
+  const label = document.querySelector('#selected-table-label');
+  if (label) label.textContent = selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa';
+  const addButton = document.querySelector('#add-button');
+  if (addButton) addButton.disabled = !selectedTableNumber;
+}
+function openSongModal(song) {
+  selectedSong = { ...song, durationLabel: 'Consultando duración…' };
+  selectedTableNumber = '';
+  selectedSingerName = '';
+  renderSelection();
+  fetch(`https://www.googleapis.com/youtube/v3/videos?${new URLSearchParams({ part: 'contentDetails,snippet', id: song.id, key: YOUTUBE_API_KEY })}`)
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error('No se pudo consultar la duración.')))
+    .then((data) => {
+      const details = data.items?.[0];
+      if (!details || selectedSong?.id !== song.id) return;
+      selectedSong = { ...selectedSong, durationLabel: formatIsoDuration(details.contentDetails?.duration), description: details.snippet?.description || selectedSong.description };
+      renderSelection();
+    })
+    .catch(() => {
+      if (selectedSong?.id !== song.id) return;
+      selectedSong = { ...selectedSong, durationLabel: 'Duración no disponible' };
+      renderSelection();
+    });
 }
 function renderSelection() {
   const node = document.querySelector('#selection');
   if (!node) return;
-  node.innerHTML = selectedSong ? `<section class="selected card"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2>${escapeHtml(selectedSong.title)}</h2><div class="muted">${escapeHtml(selectedSong.channelTitle)}</div><div class="form-grid"><input id="table-input" class="input" inputmode="numeric" placeholder="Mesa"/><input id="singer-input" class="input" placeholder="Nombre del cantante"/><button id="add-button" class="button">${icon('playlist_add')}<span>Agregar a la cola</span></button></div></div></section>` : '';
+  if (!selectedSong) { node.innerHTML = ''; return; }
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div></div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div><input id="custom-table-input" class="input" type="number" min="101" step="1" inputmode="numeric" placeholder="Otra mesa, si supera la 100" value="${selectedTableNumber && Number(selectedTableNumber) > 100 ? escapeHtml(selectedTableNumber) : ''}"/></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${selectedTableNumber ? '' : 'disabled'}>${icon('playlist_add')}Agregar a la cola</button></div></div></section></div>`;
+  node.querySelector('#close-song-modal')?.addEventListener('click', () => { selectedSong = null; renderSelection(); });
+  node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') { selectedSong = null; renderSelection(); } });
+  node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; node.querySelector('#custom-table-input').value = ''; syncSelectionModal(); }));
+  node.querySelector('#custom-table-input')?.addEventListener('input', (event) => { selectedTableNumber = event.target.value.trim(); node.querySelectorAll('.table-choice').forEach((button) => button.classList.remove('selected')); syncSelectionModal(); });
+  node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
   node.querySelector('#add-button')?.addEventListener('click', () => {
-    const tableNumber = node.querySelector('#table-input').value.trim();
-    const singerName = node.querySelector('#singer-input').value.trim();
-    if (!tableNumber || !singerName) return notify('Completa mesa y cantante.');
+    const tableNumber = selectedTableNumber.trim();
+    if (!tableNumber) return notify('Selecciona una mesa para continuar.');
+    const customTable = node.querySelector('#custom-table-input')?.value.trim();
+    if (customTable && Number(customTable) < 101) return notify('La mesa personalizada debe ser mayor a 100.');
+    const singerName = selectedSingerName.trim() || 'Invitado';
     save({ ...state, queue: [...state.queue, { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() }] });
-    selectedSong = null; renderSelection(); notify('Canción agregada a la cola.');
+    selectedSong = null;
+    selectedTableNumber = '';
+    selectedSingerName = '';
+    renderSelection();
+    notify('Canción agregada a la cola.');
   });
 }
-async function searchYoutube() {
+async function searchYoutube({ pageToken = '', pageNumber = 1 } = {}) {
   const input = document.querySelector('#search-input'); const button = document.querySelector('#search-button'); const error = document.querySelector('#search-error');
-  const query = input.value.trim(); if (!query) return notify('Escribe una canción o artista.');
+  const query = input.value.trim() || searchState.query; if (!query) return notify('Escribe una canción o artista.');
+  searchState = { ...searchState, query, page: pageNumber };
   button.disabled = true; button.textContent = 'Buscando…'; error.innerHTML = '';
   try {
-    const params = new URLSearchParams({ part:'snippet', type:'video', maxResults:'12', videoEmbeddable:'true', videoSyndicated:'true', q:`${query} karaoke`, key:YOUTUBE_API_KEY });
+    const params = new URLSearchParams({ part:'snippet', type:'video', maxResults:String(searchState.pageSize), videoEmbeddable:'true', videoSyndicated:'true', q:`${query} karaoke`, key:YOUTUBE_API_KEY });
+    if (pageToken) params.set('pageToken', pageToken);
     const response = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`);
     if (!response.ok) throw new Error('YouTube no respondió correctamente.');
     const data = await response.json();
-    renderResults((data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url })));
+    const results = (data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, description:item.snippet.description, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url }));
+    searchState = { ...searchState, nextPageToken: data.nextPageToken || null, prevPageToken: data.prevPageToken || null, totalResults: data.pageInfo?.totalResults || 0, results };
+    renderResults(results);
   } catch (err) { error.innerHTML = `<div class="error">${escapeHtml(err.message)} Revisa la configuración de YouTube.</div>`; }
   finally { button.disabled = false; button.textContent = 'Buscar'; }
 }
@@ -526,7 +599,7 @@ function displayVisualizerMarkup() {
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="transition-record"><div class="record-disc"><span>MUXO</span></div><div class="transition-copy"><div class="eyebrow">${icon('mic_external_on')} PRÓXIMA VOZ</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div class="transition-side"><div class="transition-brand"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>El escenario es tuyo.</p></div></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
