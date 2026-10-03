@@ -17,6 +17,8 @@ let saveTimer = null;
 let firebaseDb = null;
 let firebaseReady = false;
 let displayIframe = null;
+let displayPlayer = null;
+let youtubeApiPromise = null;
 let lastAppliedPlaybackCommandId = null;
 const localKey = 'muxo-pages-session';
 
@@ -27,10 +29,24 @@ function notify(message) { const node = document.createElement('div'); node.clas
 function youtubeUrl(videoId) { return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&widget_referrer=${encodeURIComponent(location.href)}`; }
 function playbackState() { return state.playback ?? { volume: 100, command: null }; }
 function playbackVolume() { const volume = Number(playbackState().volume); return Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : 100; }
+function loadYoutubeApi() {
+  if (window.YT?.Player) return Promise.resolve();
+  if (youtubeApiPromise) return youtubeApiPromise;
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { previousReady?.(); resolve(); };
+    const script = document.createElement('script');
+    script.src = 'https://www.youtube.com/iframe_api';
+    script.async = true;
+    script.dataset.muxoYoutubeApi = 'true';
+    script.onerror = () => reject(new Error('No se pudo cargar el reproductor de YouTube.'));
+    document.head.append(script);
+  });
+  return youtubeApiPromise;
+}
 function postYoutubeCommand(func, args = []) {
-  const iframe = document.querySelector('#display-video');
-  if (!iframe?.contentWindow) return false;
-  iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube.com');
+  if (!displayPlayer || typeof displayPlayer[func] !== 'function') return false;
+  displayPlayer[func](...args);
   return true;
 }
 function postPlaybackCommand(command) {
@@ -48,23 +64,30 @@ function syncDisplayVolume() { postYoutubeCommand('setVolume', [playbackVolume()
 function applyPlaybackCommand(command) {
   if (!command || command.id === lastAppliedPlaybackCommandId) return;
   lastAppliedPlaybackCommandId = command.id;
-  if (postPlaybackCommand(command)) {
-    const iframe = document.querySelector('#display-video');
-    if (!iframe?.dataset.playerReady) window.setTimeout(() => postPlaybackCommand(command), 600);
-  }
+  postPlaybackCommand(command);
 }
-function attachDisplayPlayer() {
+async function attachDisplayPlayer() {
   const iframe = document.querySelector('#display-video');
-  if (!iframe) { displayIframe = null; return; }
+  if (!iframe) { displayIframe = null; displayPlayer = null; return; }
   if (iframe === displayIframe) return;
   displayIframe = iframe;
-  iframe.addEventListener('load', () => {
-    iframe.dataset.playerReady = 'true';
-    syncDisplayVolume();
-    const command = playbackState().command;
-    if (command?.id === lastAppliedPlaybackCommandId) postPlaybackCommand(command);
-  });
-  syncDisplayVolume();
+  displayPlayer = null;
+  try {
+    await loadYoutubeApi();
+    if (document.querySelector('#display-video') !== iframe) return;
+    displayPlayer = new window.YT.Player('display-video', {
+      events: {
+        onReady: () => {
+          syncDisplayVolume();
+          const command = playbackState().command;
+          if (command?.id === lastAppliedPlaybackCommandId) postPlaybackCommand(command);
+        },
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    notify('El reproductor de YouTube no está disponible.');
+  }
 }
 function sendPlaybackCommand(action, volume = playbackVolume()) {
   const nextVolume = Math.max(0, Math.min(100, volume));
