@@ -4,6 +4,8 @@ import { getFirestore, doc, getDoc, onSnapshot, setDoc, runTransaction } from 'h
 const YOUTUBE_API_KEY = 'AIzaSyDs31A8sNQqSVESILNKv93qWLxEAq-33E4';
 const FIREBASE_CONFIG = { apiKey: 'AIzaSyBwySV_jaJoQcow6u494XH7WkFmMY3eyG0', authDomain: 'muxo-karaoke.firebaseapp.com', projectId: 'muxo-karaoke', storageBucket: 'muxo-karaoke.firebasestorage.app', messagingSenderId: '290765040154', appId: '1:290765040154:web:eb204766dcdc3c58437fa3' };
 const SESSION_REF = 'sessions/muxo-main';
+const PRIORITY_CHANNEL_NAME = 'Karaoke Entre Panas';
+const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/keyframe_audio-inspirational-cinematic-ambient-after-the-storm-133540.mp3';
 const demoQueue = [
   { id: 'demo-1', tableNumber: '7', singerName: 'Diego', songTitle: 'Bohemian Rhapsody — Queen (Karaoke)', youtubeVideoId: 'fJ9rUzIMcZQ', thumbnail: 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', channelTitle: 'Karaoke Version', status: 'queued', createdAt: Date.now() - 180000 },
   { id: 'demo-2', tableNumber: '3', singerName: 'Andrea', songTitle: 'Smells Like Teen Spirit — Nirvana (Karaoke)', youtubeVideoId: 'hTWKbfoikeg', thumbnail: 'https://i.ytimg.com/vi/hTWKbfoikeg/hqdefault.jpg', channelTitle: 'Sing King Karaoke', status: 'queued', createdAt: Date.now() - 120000 },
@@ -29,6 +31,7 @@ let displayTransitionTimer = null;
 let displayTransitionActive = false;
 let idleCommercialActive = false;
 let displayVideoError = false;
+let transitionAmbientAudio = null;
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) {
@@ -39,6 +42,13 @@ function escapeHtml(value) {
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"');
   return normalized.replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+}
+function normalizeChannelName(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+function prioritizeSearchResults(results) {
+  const priority = normalizeChannelName(PRIORITY_CHANNEL_NAME);
+  return [...results].sort((first, second) => Number(normalizeChannelName(second.channelTitle).includes(priority)) - Number(normalizeChannelName(first.channelTitle).includes(priority)));
 }
 function icon(name) { return `<span class="material-symbols-rounded" aria-hidden="true">${name}</span>`; }
 function route() { return (location.hash.replace('#', '') || 'waiter').split('?')[0]; }
@@ -107,11 +117,11 @@ function startDisplayVisualizer() {
     const isPlaying = displayPlayer.getPlayerState?.() === window.YT?.PlayerState?.PLAYING;
     const position = Number(displayPlayer.getCurrentTime?.()) || 0;
     const wave = (Math.sin(timestamp * .006 + position * 1.7) + Math.sin(timestamp * .011 + position * 2.5) + 2) / 4;
-    const level = isPlaying ? .3 + wave * .7 : .1;
+    const level = isPlaying ? .18 + wave * .82 : .06;
     visualizer.style.setProperty('--visualizer-level', level.toFixed(3));
-    visualizer.style.setProperty('--visualizer-height', `${Math.round(5 + level * 26)}px`);
-    visualizer.style.setProperty('--visualizer-width', `${Math.round(5 + level * 26)}px`);
-    visualizer.style.setProperty('--visualizer-line-scale', `${(.72 + level * .28).toFixed(3)}`);
+    visualizer.style.setProperty('--visualizer-glow', `${(0.35 + level * .65).toFixed(3)}`);
+    visualizer.style.setProperty('--visualizer-scale', `${(.86 + level * .14).toFixed(3)}`);
+    visualizer.style.setProperty('--visualizer-drift', `${Math.round(level * 18)}px`);
     visualizer.classList.toggle('is-playing', isPlaying);
     displayVisualizerFrame = requestAnimationFrame(animate);
   };
@@ -152,6 +162,22 @@ function createSpeechUtterance(text) {
   const voice = preferredSpeechVoice();
   if (voice) utterance.voice = voice;
   return utterance;
+}
+function startTransitionAmbientAudio() {
+  if (!transitionAmbientAudio) {
+    transitionAmbientAudio = new Audio(TRANSITION_AUDIO_URL);
+    transitionAmbientAudio.loop = true;
+    transitionAmbientAudio.preload = 'auto';
+    transitionAmbientAudio.volume = .14;
+  }
+  transitionAmbientAudio.currentTime = 0;
+  const playRequest = transitionAmbientAudio.play();
+  playRequest?.catch?.(() => {});
+}
+function stopTransitionAmbientAudio() {
+  if (!transitionAmbientAudio) return;
+  transitionAmbientAudio.pause();
+  transitionAmbientAudio.currentTime = 0;
 }
 function stopIdleCommercialLoop() {
   if (!idleCommercialActive) return;
@@ -210,6 +236,7 @@ function showDisplayVideoError() {
   displayTransitionTimer = null;
   stopDisplayVisualizer();
   window.speechSynthesis?.cancel();
+  stopTransitionAmbientAudio();
   stopIdleCommercialLoop();
   postYoutubeCommand('pauseVideo');
   const transition = document.querySelector('#display-transition');
@@ -254,6 +281,7 @@ function finishDisplayTransition() {
   clearTimeout(displayTransitionTimer);
   displayTransitionTimer = null;
   window.speechSynthesis?.cancel();
+  stopTransitionAmbientAudio();
   const overlay = document.querySelector('#display-transition');
   if (overlay) overlay.hidden = true;
   displayTransitionActive = false;
@@ -274,6 +302,7 @@ function beginDisplayTransition(current) {
     overlay.querySelector('[data-transition-table]').innerHTML = `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}`;
     overlay.hidden = false;
   }
+  startTransitionAmbientAudio();
   speakDisplayTransition(current);
 }
 async function attachDisplayPlayer({ transition = false } = {}) {
@@ -370,7 +399,7 @@ function renderResults(results) {
   const firstResult = ((searchState.page - 1) * searchState.pageSize) + 1;
   const lastResult = firstResult + results.length - 1;
   const total = searchState.totalResults ? ` de ${searchState.totalResults.toLocaleString('es-PE')}` : '';
-  node.innerHTML = `<div class="results-toolbar"><div><strong>${firstResult}–${lastResult}${total}</strong><span class="muted"> · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
+  node.innerHTML = `<div class="results-toolbar"><div><strong>${firstResult}–${lastResult}${total}</strong><span class="muted"> · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info">${song.isPriority ? `<span class="priority-channel">${icon('star')}RECOMENDADO · ${escapeHtml(PRIORITY_CHANNEL_NAME)}</span>` : ''}<div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
   node.querySelectorAll('.choose-song').forEach((button) => button.addEventListener('click', () => openSongModal(JSON.parse(button.dataset.song))));
   node.querySelector('#page-size')?.addEventListener('change', (event) => {
     searchState.pageSize = Number(event.target.value);
@@ -455,7 +484,7 @@ async function searchYoutube({ pageToken = '', pageNumber = 1 } = {}) {
     const response = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`);
     if (!response.ok) throw new Error('YouTube no respondió correctamente.');
     const data = await response.json();
-    const results = (data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, description:item.snippet.description, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url }));
+    const results = prioritizeSearchResults((data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, description:item.snippet.description, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url, isPriority: normalizeChannelName(item.snippet.channelTitle).includes(normalizeChannelName(PRIORITY_CHANNEL_NAME)) })));
     searchState = { ...searchState, nextPageToken: data.nextPageToken || null, prevPageToken: data.prevPageToken || null, totalResults: data.pageInfo?.totalResults || 0, results };
     renderResults(results);
   } catch (err) { error.innerHTML = `<div class="error">${escapeHtml(err.message)} Revisa la configuración de YouTube.</div>`; }
@@ -593,8 +622,7 @@ function displayQueueMarkup() {
   return state.queue.slice(0, 4).map((item, index) => `<div class="display-item"><strong>${String(index + 1).padStart(2, '0')} · ${escapeHtml(item.singerName)}</strong><span>${escapeHtml(item.songTitle)}</span><span>${icon('table_restaurant')} Mesa ${escapeHtml(item.tableNumber)}</span></div>`).join('') || '<div class="empty">La próxima canción se está preparando…</div>';
 }
 function displayVisualizerMarkup() {
-  const bars = Array.from({ length: 18 }, () => '<i></i>').join('');
-  return `<div id="display-edge-visualizer" class="display-edge-visualizer" aria-hidden="true"><span class="edge-line edge-line-top"></span><span class="edge-line edge-line-right"></span><span class="edge-line edge-line-bottom"></span><span class="edge-line edge-line-left"></span><div class="edge-spectrum edge-spectrum-top">${bars}</div><div class="edge-spectrum edge-spectrum-right">${bars}</div><div class="edge-spectrum edge-spectrum-bottom">${bars}</div><div class="edge-spectrum edge-spectrum-left">${bars}</div></div>`;
+  return `<div id="display-edge-visualizer" class="display-edge-visualizer" aria-hidden="true"><span class="edge-ribbon edge-ribbon-top"></span><span class="edge-ribbon edge-ribbon-right"></span><span class="edge-ribbon edge-ribbon-bottom"></span><span class="edge-ribbon edge-ribbon-left"></span><span class="edge-corner edge-corner-tl"></span><span class="edge-corner edge-corner-tr"></span><span class="edge-corner edge-corner-br"></span><span class="edge-corner edge-corner-bl"></span></div>`;
 }
 function displayView(transition = false) {
   const current = state.nowPlaying;
@@ -637,6 +665,7 @@ function render() {
   if (currentRoute !== 'display') {
     stopPlaybackTelemetry();
     stopDisplayVisualizer();
+    stopTransitionAmbientAudio();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
     idleCommercialActive = false;

@@ -78,6 +78,8 @@ a { color: inherit; text-decoration: none; }
 .song-info { min-width: 0; }
 .song-title { display: -webkit-box; overflow: hidden; font-weight: 600; line-height: 1.25; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .song-channel { margin: 7px 0 10px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.priority-channel { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 7px; color: var(--lime); font: 10px 'DM Mono', monospace; letter-spacing: .04em; line-height: 1.2; }
+.priority-channel .material-symbols-rounded { font-size: 14px; }
 .song .button { min-height: 38px; padding: 8px 11px; font-size: 12px; }
 .empty { padding: 42px; color: var(--muted); text-align: center; border: 1px dashed #494052; border-radius: var(--radius); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: #050307d9; backdrop-filter: blur(12px); }
@@ -152,25 +154,25 @@ a { color: inherit; text-decoration: none; }
 .display-stage::after { position: absolute; inset: 0; z-index: 1; display: block; background: linear-gradient(90deg, #030304b8 0, transparent 43%), linear-gradient(0deg, #030304e6 0, transparent 34%); content: ''; pointer-events: none; }
 .display-video-frame { position: absolute; inset: 0; z-index: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: #000; box-shadow: none; }
 .display-video-frame iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
-.display-edge-visualizer { --visualizer-height: 8px; --visualizer-width: 8px; --visualizer-line-scale: .8; position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .15; transition: opacity .4s ease; }
-.display-edge-visualizer.is-playing { opacity: .44; }
-.edge-line { position: absolute; display: block; background: linear-gradient(90deg, transparent, #c9f52b, #c05cf4, transparent); box-shadow: 0 0 14px #c9f52b66, 0 0 26px #b62bf244; opacity: .58; }
-.edge-line-top, .edge-line-bottom { left: 4%; width: 92%; height: 2px; transform: scaleX(var(--visualizer-line-scale)); }
-.edge-line-top { top: 0; transform-origin: center top; }
-.edge-line-bottom { bottom: 0; transform-origin: center bottom; }
-.edge-line-left, .edge-line-right { top: 5%; width: 2px; height: 90%; transform: scaleY(var(--visualizer-line-scale)); }
-.edge-line-left { left: 0; transform-origin: left center; }
-.edge-line-right { right: 0; transform-origin: right center; }
-.edge-spectrum { position: absolute; display: flex; gap: 5px; }
-.edge-spectrum i { display: block; flex: 1; min-width: 2px; border-radius: 999px; background: linear-gradient(180deg, #c9f52b, #c05cf4); box-shadow: 0 0 10px #c9f52b66; opacity: .54; transition: height .14s ease, width .14s ease, opacity .4s ease; }
-.edge-spectrum-top { top: 3px; left: 10%; right: 10%; align-items: flex-start; height: 28px; }
-.edge-spectrum-top i, .edge-spectrum-bottom i { width: 3px; height: var(--visualizer-height); }
-.edge-spectrum-top i:nth-child(3n), .edge-spectrum-bottom i:nth-child(3n) { opacity: .42; }
-.edge-spectrum-bottom { right: 10%; bottom: 3px; left: 10%; align-items: flex-end; height: 28px; }
-.edge-spectrum-right { top: 12%; right: 3px; bottom: 12%; flex-direction: column; align-items: flex-end; width: 28px; }
-.edge-spectrum-left { top: 12%; bottom: 12%; left: 3px; flex-direction: column; align-items: flex-start; width: 28px; }
-.edge-spectrum-left i, .edge-spectrum-right i { width: var(--visualizer-width); height: 3px; }
-.edge-spectrum-left i:nth-child(3n), .edge-spectrum-right i:nth-child(3n) { opacity: .42; }
+.display-edge-visualizer { --visualizer-glow: .35; --visualizer-scale: .9; --visualizer-drift: 0px; position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .16; mix-blend-mode: screen; transition: opacity .6s ease; }
+.display-edge-visualizer.is-playing { opacity: .74; }
+.edge-ribbon { position: absolute; display: block; overflow: hidden; background: linear-gradient(90deg, transparent 0%, #c9f52b 19%, #e7ff9a 36%, #c05cf4 58%, #c9f52b 81%, transparent 100%); background-size: 220% 100%; opacity: calc(.42 + var(--visualizer-glow) * .44); box-shadow: 0 0 calc(7px + var(--visualizer-glow) * 12px) #c9f52b88, 0 0 calc(13px + var(--visualizer-glow) * 21px) #b62bf255; transform: scaleX(var(--visualizer-scale)); animation: edge-shimmer 4.8s linear infinite; }
+.edge-ribbon::before { position: absolute; inset: -5px 0; background: inherit; content: ''; filter: blur(5px); opacity: .46; }
+.edge-ribbon::after { position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #ffffff, transparent); background-size: 170px 100%; content: ''; opacity: .46; transform: translateX(var(--visualizer-drift)); }
+.edge-ribbon-top, .edge-ribbon-bottom { left: 5.5%; width: 89%; height: 1px; }
+.edge-ribbon-top { top: 3px; transform-origin: center top; }
+.edge-ribbon-bottom { bottom: 3px; transform-origin: center bottom; }
+.edge-ribbon-right, .edge-ribbon-left { top: 5.5%; width: 1px; height: 89%; background: linear-gradient(180deg, transparent 0%, #c9f52b 19%, #e7ff9a 36%, #c05cf4 58%, #c9f52b 81%, transparent 100%); background-size: 100% 220%; transform: scaleY(var(--visualizer-scale)); animation-name: edge-shimmer-vertical; }
+.edge-ribbon-left { left: 3px; transform-origin: left center; }
+.edge-ribbon-right { right: 3px; transform-origin: right center; }
+.edge-ribbon-right::after, .edge-ribbon-left::after { transform: translateY(var(--visualizer-drift)); }
+.edge-corner { position: absolute; width: 58px; height: 58px; border: 1px solid #c9f52b66; opacity: calc(.24 + var(--visualizer-glow) * .35); filter: drop-shadow(0 0 7px #c9f52b66); }
+.edge-corner-tl { top: 3px; left: 3px; border-right: 0; border-bottom: 0; border-radius: 18px 0 0; }
+.edge-corner-tr { top: 3px; right: 3px; border-bottom: 0; border-left: 0; border-radius: 0 18px 0 0; }
+.edge-corner-br { right: 3px; bottom: 3px; border-top: 0; border-left: 0; border-radius: 0 0 18px; }
+.edge-corner-bl { bottom: 3px; left: 3px; border-top: 0; border-right: 0; border-radius: 0 0 0 18px; }
+@keyframes edge-shimmer { from { background-position: 0 0; } to { background-position: 220% 0; } }
+@keyframes edge-shimmer-vertical { from { background-position: 0 0; } to { background-position: 0 220%; } }
 .display-copy { position: absolute; bottom: clamp(14px, 3vh, 30px); left: clamp(14px, 2vw, 30px); z-index: 3; max-width: min(310px, 24vw); padding: 10px 12px; background: linear-gradient(135deg, #0c090fa8, #27132ba0); border: 1px solid #ffffff14; border-radius: 11px; box-shadow: 0 12px 34px #0005; opacity: .78; backdrop-filter: blur(12px); }
 .display-copy .eyebrow { font-size: 9px; letter-spacing: .12em; }
 .display-copy h1 { margin: 7px 0 4px; font-size: clamp(26px, 3vw, 46px); letter-spacing: -.08em; line-height: .9; }
