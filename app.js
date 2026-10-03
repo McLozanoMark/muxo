@@ -21,6 +21,7 @@ let displayPlayer = null;
 let youtubeApiPromise = null;
 let lastAppliedPlaybackCommandId = null;
 let playbackTelemetryTimer = null;
+let displayVisualizerFrame = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
 let idleCommercialActive = false;
@@ -86,6 +87,32 @@ function applyPlaybackCommand(command) {
 function stopPlaybackTelemetry() {
   clearInterval(playbackTelemetryTimer);
   playbackTelemetryTimer = null;
+}
+function stopDisplayVisualizer() {
+  if (displayVisualizerFrame !== null) cancelAnimationFrame(displayVisualizerFrame);
+  displayVisualizerFrame = null;
+}
+function startDisplayVisualizer() {
+  stopDisplayVisualizer();
+  const visualizer = document.querySelector('#display-edge-visualizer');
+  if (!visualizer || !displayPlayer) return;
+  const animate = (timestamp) => {
+    if (!visualizer.isConnected || !displayPlayer) {
+      stopDisplayVisualizer();
+      return;
+    }
+    const isPlaying = displayPlayer.getPlayerState?.() === window.YT?.PlayerState?.PLAYING;
+    const position = Number(displayPlayer.getCurrentTime?.()) || 0;
+    const wave = (Math.sin(timestamp * .006 + position * 1.7) + Math.sin(timestamp * .011 + position * 2.5) + 2) / 4;
+    const level = isPlaying ? .3 + wave * .7 : .1;
+    visualizer.style.setProperty('--visualizer-level', level.toFixed(3));
+    visualizer.style.setProperty('--visualizer-height', `${Math.round(5 + level * 26)}px`);
+    visualizer.style.setProperty('--visualizer-width', `${Math.round(5 + level * 26)}px`);
+    visualizer.style.setProperty('--visualizer-line-scale', `${(.72 + level * .28).toFixed(3)}`);
+    visualizer.classList.toggle('is-playing', isPlaying);
+    displayVisualizerFrame = requestAnimationFrame(animate);
+  };
+  displayVisualizerFrame = requestAnimationFrame(animate);
 }
 function startPlaybackTelemetry() {
   stopPlaybackTelemetry();
@@ -178,6 +205,7 @@ function showDisplayVideoError() {
   displayTransitionActive = false;
   clearTimeout(displayTransitionTimer);
   displayTransitionTimer = null;
+  stopDisplayVisualizer();
   window.speechSynthesis?.cancel();
   stopIdleCommercialLoop();
   postYoutubeCommand('pauseVideo');
@@ -247,9 +275,10 @@ function beginDisplayTransition(current) {
 }
 async function attachDisplayPlayer({ transition = false } = {}) {
   const iframe = document.querySelector('#display-video');
-  if (!iframe) { stopPlaybackTelemetry(); displayIframe = null; displayPlayer = null; return; }
+  if (!iframe) { stopPlaybackTelemetry(); stopDisplayVisualizer(); displayIframe = null; displayPlayer = null; return; }
   if (iframe === displayIframe) return;
   stopPlaybackTelemetry();
+  stopDisplayVisualizer();
   displayIframe = iframe;
   displayPlayer = null;
   hideDisplayVideoError();
@@ -261,6 +290,7 @@ async function attachDisplayPlayer({ transition = false } = {}) {
         onReady: () => {
           if (!displayVideoError) hideDisplayVideoError();
           syncDisplayVolume();
+          startDisplayVisualizer();
           if (transition && state.nowPlaying) {
             beginDisplayTransition(state.nowPlaying);
             return;
@@ -489,10 +519,14 @@ function bindOperator() {
 function displayQueueMarkup() {
   return state.queue.slice(0, 4).map((item, index) => `<div class="display-item"><strong>${String(index + 1).padStart(2, '0')} · ${escapeHtml(item.singerName)}</strong><span>${escapeHtml(item.songTitle)}</span><span>${icon('table_restaurant')} Mesa ${escapeHtml(item.tableNumber)}</span></div>`).join('') || '<div class="empty">La próxima canción se está preparando…</div>';
 }
+function displayVisualizerMarkup() {
+  const bars = Array.from({ length: 18 }, () => '<i></i>').join('');
+  return `<div id="display-edge-visualizer" class="display-edge-visualizer" aria-hidden="true"><span class="edge-line edge-line-top"></span><span class="edge-line edge-line-right"></span><span class="edge-line edge-line-bottom"></span><span class="edge-line edge-line-left"></span><div class="edge-spectrum edge-spectrum-top">${bars}</div><div class="edge-spectrum edge-spectrum-right">${bars}</div><div class="edge-spectrum edge-spectrum-bottom">${bars}</div><div class="edge-spectrum edge-spectrum-left">${bars}</div></div>`;
+}
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main><div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
@@ -529,6 +563,7 @@ function render() {
   const waiterFormState = currentRoute === 'waiter' ? captureWaiterFormState() : null;
   if (currentRoute !== 'display') {
     stopPlaybackTelemetry();
+    stopDisplayVisualizer();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
     idleCommercialActive = false;
