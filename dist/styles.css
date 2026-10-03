@@ -173,11 +173,18 @@ a { color: inherit; text-decoration: none; }
 .edge-corner-bl { bottom: 3px; left: 3px; border-top: 0; border-right: 0; border-radius: 0 0 0 18px; }
 @keyframes edge-shimmer { from { background-position: 0 0; } to { background-position: 220% 0; } }
 @keyframes edge-shimmer-vertical { from { background-position: 0 0; } to { background-position: 0 220%; } }
-.display-copy { position: absolute; bottom: clamp(14px, 3vh, 30px); left: clamp(14px, 2vw, 30px); z-index: 3; max-width: min(310px, 24vw); padding: 10px 12px; background: linear-gradient(135deg, #0c090fa8, #27132ba0); border: 1px solid #ffffff14; border-radius: 11px; box-shadow: 0 12px 34px #0005; opacity: .78; backdrop-filter: blur(12px); }
+.display-copy { position: absolute; bottom: clamp(14px, 3vh, 30px); left: clamp(14px, 2vw, 30px); z-index: 3; max-width: min(350px, 27vw); padding: 12px 14px; background: linear-gradient(135deg, #0c090fa8, #27132ba0); border: 1px solid #ffffff14; border-radius: 11px; box-shadow: 0 12px 34px #0005; opacity: .78; backdrop-filter: blur(12px); }
 .display-copy .eyebrow { font-size: 9px; letter-spacing: .12em; }
-.display-copy h1 { margin: 7px 0 4px; font-size: clamp(26px, 3vw, 46px); letter-spacing: -.08em; line-height: .9; }
-.display-song { color: #d5cbd9; font-size: clamp(12px, 1vw, 14px); line-height: 1.2; }
-.display-copy .table-pill { margin-top: 8px; padding: 4px 7px; font-size: 9px; background: #10150b9c; }
+.display-table-label, .display-singer-label, .transition-table-label, .transition-singer-label { color: var(--lime); font: 10px 'DM Mono', monospace; letter-spacing: .16em; }
+.display-table-label { margin-top: 9px; }
+.display-copy h1 { margin: 1px 0 8px; color: var(--text); font-size: clamp(46px, 5vw, 78px); letter-spacing: -.1em; line-height: .84; }
+.display-song { width: 100%; margin-bottom: 12px; color: #eee5f0; font-size: clamp(14px, 1.25vw, 18px); line-height: 1.25; }
+.display-singer-label { margin-bottom: 3px; color: #aaa0b0; font-size: 9px; }
+.display-singer { color: #d5cbd9; font-size: clamp(14px, 1.1vw, 17px); font-weight: 600; line-height: 1.2; }
+.text-marquee { overflow: hidden; }
+.text-marquee > [data-marquee-content] { display: block; width: max-content; min-width: 100%; overflow: hidden; white-space: nowrap; }
+.text-marquee.is-overflowing > [data-marquee-content] { animation: muxo-marquee 11s ease-in-out infinite alternate; }
+@keyframes muxo-marquee { from { transform: translateX(0); } to { transform: translateX(calc(-1 * var(--marquee-distance))); } }
 .up-next { margin-top: 0; border-top: 0; padding-top: 0; }
 .display-next-card { position: absolute; right: clamp(14px, 2vw, 30px); bottom: clamp(14px, 3vh, 30px); z-index: 3; width: min(270px, 21vw); padding: 10px; background: #0e0a12a8; border: 1px solid #ffffff12; border-radius: 11px; box-shadow: 0 12px 34px #0005; opacity: .7; backdrop-filter: blur(12px); }
 .display-next-card .eyebrow { font-size: 9px; letter-spacing: .12em; }
@@ -220,8 +227,10 @@ a { color: inherit; text-decoration: none; }
 .transition-copy { min-width: 0; }
 .transition-copy .eyebrow { margin-bottom: 16px; }
 .transition-card h2 { margin: 0; color: var(--text); font-size: clamp(44px, 7vw, 96px); letter-spacing: -.08em; line-height: .9; }
-.transition-card .transition-copy p { max-width: 570px; margin: 18px 0 0; color: #d7cbdc; font-size: clamp(18px, 2.4vw, 32px); line-height: 1.2; }
-.transition-card .table-pill { margin-top: 24px; background: #10150bb8; }
+.transition-table-label { margin-bottom: 2px; }
+.transition-marquee { max-width: 570px; margin-top: 18px; color: #d7cbdc; font-size: clamp(18px, 2.4vw, 32px); line-height: 1.2; }
+.transition-singer-label { margin-top: 22px; color: #aaa0b0; font-size: 10px; }
+.transition-singer { margin-top: 4px; color: var(--text); font-size: clamp(20px, 2.6vw, 34px); font-weight: 600; line-height: 1.1; }
 .transition-side { display: flex; flex-direction: column; justify-content: center; margin-left: clamp(20px, 4vw, 54px); padding-left: clamp(20px, 4vw, 54px); border-left: 1px solid #ffffff1c; }
 .transition-brand { display: inline-flex; align-items: flex-end; gap: 12px; color: var(--text); font-size: clamp(28px, 4vw, 52px); font-weight: 700; letter-spacing: .18em; }
 .transition-brand .brand-mark i { width: 7px; }
