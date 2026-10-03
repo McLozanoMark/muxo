@@ -16,6 +16,8 @@ let selectedSong = null;
 let saveTimer = null;
 let firebaseDb = null;
 let firebaseReady = false;
+let displayIframe = null;
+let lastAppliedPlaybackCommandId = null;
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -23,6 +25,51 @@ function route() { return (location.hash.replace('#', '') || 'waiter').split('?'
 function id() { return crypto.randomUUID?.() || `muxo-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function notify(message) { const node = document.createElement('div'); node.className = 'toast'; node.textContent = message; document.body.append(node); setTimeout(() => node.remove(), 2600); }
 function youtubeUrl(videoId) { return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&widget_referrer=${encodeURIComponent(location.href)}`; }
+function playbackState() { return state.playback ?? { volume: 100, command: null }; }
+function playbackVolume() { const volume = Number(playbackState().volume); return Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : 100; }
+function postYoutubeCommand(func, args = []) {
+  const iframe = document.querySelector('#display-video');
+  if (!iframe?.contentWindow) return false;
+  iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube.com');
+  return true;
+}
+function postPlaybackCommand(command) {
+  if (command.action === 'pause') return postYoutubeCommand('pauseVideo');
+  if (command.action === 'play') return postYoutubeCommand('playVideo');
+  if (command.action === 'restart') {
+    const seeked = postYoutubeCommand('seekTo', [0, true]);
+    postYoutubeCommand('playVideo');
+    return seeked;
+  }
+  if (command.action === 'set-volume') return postYoutubeCommand('setVolume', [command.volume]);
+  return false;
+}
+function syncDisplayVolume() { postYoutubeCommand('setVolume', [playbackVolume()]); }
+function applyPlaybackCommand(command) {
+  if (!command || command.id === lastAppliedPlaybackCommandId) return;
+  lastAppliedPlaybackCommandId = command.id;
+  if (postPlaybackCommand(command)) {
+    const iframe = document.querySelector('#display-video');
+    if (!iframe?.dataset.playerReady) window.setTimeout(() => postPlaybackCommand(command), 600);
+  }
+}
+function attachDisplayPlayer() {
+  const iframe = document.querySelector('#display-video');
+  if (!iframe) { displayIframe = null; return; }
+  if (iframe === displayIframe) return;
+  displayIframe = iframe;
+  iframe.addEventListener('load', () => {
+    iframe.dataset.playerReady = 'true';
+    syncDisplayVolume();
+    const command = playbackState().command;
+    if (command?.id === lastAppliedPlaybackCommandId) postPlaybackCommand(command);
+  });
+  syncDisplayVolume();
+}
+function sendPlaybackCommand(action, volume = playbackVolume()) {
+  const nextVolume = Math.max(0, Math.min(100, volume));
+  save({ ...state, playback: { ...playbackState(), volume: nextVolume, command: { id: id(), action, volume: nextVolume, createdAt: Date.now() } } });
+}
 
 async function initData() {
   try {
@@ -89,12 +136,17 @@ async function searchYoutube() {
 }
 function operatorView() {
   const current = state.nowPlaying;
-  return `<div class="shell">${nav('operator')}<main class="page"><div class="page-head"><div><div class="eyebrow">CENTRAL DEL ENCARGADO</div><h1>La cola de esta noche</h1><p>Controla el ritmo del show. Solo el encargado puede avanzar el turno.</p></div><span class="badge">${state.queue.length} turnos pendientes</span></div><div class="operator-grid"><section class="card now-card">${current ? `<div><div class="eyebrow">AHORA CANTA</div><h2>${escapeHtml(current.singerName)}</h2><div class="song-name">${escapeHtml(current.songTitle)}</div></div><div class="now-bottom"><span class="table-pill">MESA ${escapeHtml(current.tableNumber)}</span><div class="toolbar"><button id="absent-button" class="button secondary">No está</button><button id="next-button" class="button">Siguiente</button></div></div>` : `<div><div class="eyebrow">TURNO ACTUAL</div><h2>Listo para el próximo turno</h2><div class="song-name">La pantalla mostrará la siguiente canción cuando avances.</div></div><div class="now-bottom"><span class="table-pill">${state.queue.length} EN ESPERA</span><button id="next-button" class="button">Reproducir siguiente</button></div>`}</section><section class="card queue-card"><div class="section-title"><h2>Próximos turnos</h2><span class="muted">${state.queue.length}</span></div><div id="queue-list">${queueRows()}</div></section></div></main></div>`;
+  return `<div class="shell">${nav('operator')}<main class="page"><div class="page-head"><div><div class="eyebrow">CENTRAL DEL ENCARGADO</div><h1>La cola de esta noche</h1><p>Controla el ritmo del show. Solo el encargado puede avanzar el turno.</p></div><span class="badge">${state.queue.length} turnos pendientes</span></div><div class="operator-grid"><section class="card now-card">${current ? `<div><div class="eyebrow">AHORA CANTA</div><h2>${escapeHtml(current.singerName)}</h2><div class="song-name">${escapeHtml(current.songTitle)}</div><div class="playback-controls"><button id="pause-button" class="button secondary">Pausar</button><button id="play-button" class="button secondary">Reproducir</button><button id="restart-button" class="button secondary">Desde cero</button><div class="volume-control"><button id="volume-down-button" class="icon-button" aria-label="Bajar volumen">−</button><span id="volume-label">Volumen ${playbackVolume()}%</span><button id="volume-up-button" class="icon-button" aria-label="Subir volumen">＋</button></div></div></div><div class="now-bottom"><span class="table-pill">MESA ${escapeHtml(current.tableNumber)}</span><div class="toolbar"><button id="absent-button" class="button secondary">No está</button><button id="next-button" class="button">Siguiente</button></div></div>` : `<div><div class="eyebrow">TURNO ACTUAL</div><h2>Listo para el próximo turno</h2><div class="song-name">La pantalla mostrará la siguiente canción cuando avances.</div></div><div class="now-bottom"><span class="table-pill">${state.queue.length} EN ESPERA</span><button id="next-button" class="button">Reproducir siguiente</button></div>`}</section><section class="card queue-card"><div class="section-title"><h2>Próximos turnos</h2><span class="muted">${state.queue.length}</span></div><div id="queue-list">${queueRows()}</div></section></div></main></div>`;
 }
 function queueRows() { return state.queue.length ? state.queue.map((request,index) => `<div class="queue-row"><span class="queue-number">${String(index+1).padStart(2,'0')}</span><div><div class="queue-title">${escapeHtml(request.songTitle)}</div><div class="queue-meta">${escapeHtml(request.singerName)} · Mesa ${escapeHtml(request.tableNumber)}</div></div><div class="row-actions"><button class="icon-button up" data-id="${request.id}" ${index === 0 ? 'disabled' : ''}>↑</button><button class="icon-button down" data-id="${request.id}" ${index === state.queue.length-1 ? 'disabled' : ''}>↓</button><button class="icon-button danger remove" data-id="${request.id}">×</button></div></div>`).join('') : '<div class="empty">No hay canciones en espera.</div>'; }
 function bindOperator() {
   document.querySelector('#next-button')?.addEventListener('click', () => { const [next,...rest] = state.queue; if (!next) return notify('La cola está vacía.'); save({ ...state, nowPlaying:{...next,status:'playing'}, queue:rest, recent:state.nowPlaying ? [{...state.nowPlaying,status:'finished'},...state.recent].slice(0,8) : state.recent }); });
   document.querySelector('#absent-button')?.addEventListener('click', () => { if (!state.nowPlaying) return; save({ ...state, nowPlaying:null, queue:[...state.queue,{...state.nowPlaying,status:'absent'}] }); });
+  document.querySelector('#pause-button')?.addEventListener('click', () => sendPlaybackCommand('pause'));
+  document.querySelector('#play-button')?.addEventListener('click', () => sendPlaybackCommand('play'));
+  document.querySelector('#restart-button')?.addEventListener('click', () => sendPlaybackCommand('restart'));
+  document.querySelector('#volume-down-button')?.addEventListener('click', () => sendPlaybackCommand('set-volume', playbackVolume() - 10));
+  document.querySelector('#volume-up-button')?.addEventListener('click', () => sendPlaybackCommand('set-volume', playbackVolume() + 10));
   document.querySelectorAll('.up,.down,.remove').forEach((button) => button.addEventListener('click', () => { const index = state.queue.findIndex((item) => item.id === button.dataset.id); if (button.classList.contains('remove')) return save({ ...state, queue:state.queue.filter((item) => item.id !== button.dataset.id) }); const target = button.classList.contains('up') ? index-1 : index+1; if (target < 0 || target >= state.queue.length) return; const queue = [...state.queue]; [queue[index],queue[target]] = [queue[target],queue[index]]; save({...state,queue}); }));
 }
 function displayQueueMarkup() {
@@ -103,7 +155,7 @@ function displayQueueMarkup() {
 function displayView() {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero"><div class="display-copy"><div class="eyebrow">AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table style="display:inline-block;margin-top:26px">MESA ${escapeHtml(current.tableNumber)}</span></div><div class="video"><iframe src="${youtubeUrl(current.youtubeVideoId)}" title="Video karaoke actual" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></section><section class="up-next"><div class="up-next-head"><div><div class="eyebrow">A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero"><div class="display-copy"><div class="eyebrow">AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table style="display:inline-block;margin-top:26px">MESA ${escapeHtml(current.tableNumber)}</span></div><div class="video"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId)}" title="Video karaoke actual" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div></section><section class="up-next"><div class="up-next-head"><div><div class="eyebrow">A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
@@ -127,10 +179,11 @@ function updateDisplayInPlace() {
 }
 function render() {
   const currentRoute = route();
-  if (currentRoute === 'display' && updateDisplayInPlace()) return;
+  if (currentRoute === 'display' && updateDisplayInPlace()) { attachDisplayPlayer(); applyPlaybackCommand(playbackState().command); return; }
   app.innerHTML = currentRoute === 'operator' ? operatorView() : currentRoute === 'display' ? displayView() : waiterView();
   if (currentRoute === 'waiter') { document.querySelector('#search-button')?.addEventListener('click', searchYoutube); document.querySelector('#search-input')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchYoutube(); }); renderSelection(); }
   if (currentRoute === 'operator') bindOperator();
+  if (currentRoute === 'display') { attachDisplayPlayer(); applyPlaybackCommand(playbackState().command); }
 }
 window.addEventListener('hashchange', render);
 initData();
