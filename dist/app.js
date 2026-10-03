@@ -24,6 +24,7 @@ let playbackTelemetryTimer = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
 let idleCommercialActive = false;
+let displayVideoError = false;
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) {
@@ -99,6 +100,29 @@ function startPlaybackTelemetry() {
     await setDoc(sessionDocument(), { playback }, { merge: true });
   }, 2000);
 }
+function preferredSpeechVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() ?? [];
+  const spanishVoices = voices.filter((voice) => /^es[-_]/i.test(voice.lang) || /español|espanol|spanish/i.test(voice.name));
+  const score = (voice) => {
+    const label = `${voice.name} ${voice.lang}`.toLowerCase();
+    if (/natural|neural|online/.test(label)) return 5;
+    if (/sabina|elena|jorge|google español|google espanol/.test(label)) return 4;
+    if (/es[-_]pe/.test(label)) return 3;
+    if (/es[-_]mx|es[-_]es/.test(label)) return 2;
+    return 1;
+  };
+  return [...spanishVoices].sort((first, second) => score(second) - score(first))[0] ?? null;
+}
+function createSpeechUtterance(text) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'es-PE';
+  utterance.rate = .96;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  const voice = preferredSpeechVoice();
+  if (voice) utterance.voice = voice;
+  return utterance;
+}
 function stopIdleCommercialLoop() {
   if (!idleCommercialActive) return;
   idleCommercialActive = false;
@@ -111,10 +135,7 @@ function startIdleCommercialLoop() {
   const commercial = 'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.';
   const speak = () => {
     if (!idleCommercialActive || state.nowPlaying) return;
-    const utterance = new SpeechSynthesisUtterance(commercial);
-    utterance.lang = 'es-PE';
-    utterance.rate = .92;
-    utterance.pitch = .95;
+    const utterance = createSpeechUtterance(commercial);
     utterance.onend = () => setTimeout(speak, 350);
     utterance.onerror = () => setTimeout(speak, 700);
     window.speechSynthesis.speak(utterance);
@@ -128,11 +149,14 @@ function speakDisplayTransition(current) {
     return;
   }
   window.speechSynthesis.cancel();
-  const announcement = `Mesa ${current.tableNumber} canta ${current.singerName}. El tema ${current.songTitle}.`;
   const phrases = [
-    'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.',
-    announcement,
-    announcement,
+    { text: 'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.', pauseAfter: 240 },
+    { text: `Mesa ${current.tableNumber}.`, pauseAfter: 180 },
+    { text: `Canta ${current.singerName}.`, pauseAfter: 180 },
+    { text: `El tema ${current.songTitle}.`, pauseAfter: 340 },
+    { text: `Mesa ${current.tableNumber}.`, pauseAfter: 180 },
+    { text: `Canta ${current.singerName}.`, pauseAfter: 180 },
+    { text: `El tema ${current.songTitle}.`, pauseAfter: 340 },
   ];
   let index = 0;
   const speakNext = () => {
@@ -141,15 +165,33 @@ function speakDisplayTransition(current) {
       finishDisplayTransition();
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(phrases[index++]);
-    utterance.lang = 'es-PE';
-    utterance.rate = .92;
-    utterance.pitch = .95;
-    utterance.onend = () => setTimeout(speakNext, 120);
-    utterance.onerror = () => setTimeout(speakNext, 120);
+    const phrase = phrases[index++];
+    const utterance = createSpeechUtterance(phrase.text);
+    utterance.onend = () => setTimeout(speakNext, phrase.pauseAfter);
+    utterance.onerror = () => setTimeout(speakNext, phrase.pauseAfter);
     window.speechSynthesis.speak(utterance);
   };
   speakNext();
+}
+function showDisplayVideoError() {
+  displayVideoError = true;
+  displayTransitionActive = false;
+  clearTimeout(displayTransitionTimer);
+  displayTransitionTimer = null;
+  window.speechSynthesis?.cancel();
+  stopIdleCommercialLoop();
+  postYoutubeCommand('pauseVideo');
+  const transition = document.querySelector('#display-transition');
+  if (transition) transition.hidden = true;
+  const audioActivation = document.querySelector('#audio-activation');
+  if (audioActivation) audioActivation.hidden = true;
+  const errorOverlay = document.querySelector('#display-video-error');
+  if (errorOverlay) errorOverlay.hidden = false;
+}
+function hideDisplayVideoError() {
+  displayVideoError = false;
+  const errorOverlay = document.querySelector('#display-video-error');
+  if (errorOverlay) errorOverlay.hidden = true;
 }
 function showAudioActivation() {
   const overlay = document.querySelector('#audio-activation');
@@ -210,12 +252,14 @@ async function attachDisplayPlayer({ transition = false } = {}) {
   stopPlaybackTelemetry();
   displayIframe = iframe;
   displayPlayer = null;
+  hideDisplayVideoError();
   try {
     await loadYoutubeApi();
     if (document.querySelector('#display-video') !== iframe) return;
     displayPlayer = new window.YT.Player('display-video', {
       events: {
         onReady: () => {
+          if (!displayVideoError) hideDisplayVideoError();
           syncDisplayVolume();
           if (transition && state.nowPlaying) {
             beginDisplayTransition(state.nowPlaying);
@@ -232,6 +276,7 @@ async function attachDisplayPlayer({ transition = false } = {}) {
         onStateChange: (event) => {
           if (event.data === window.YT.PlayerState.ENDED && state.nowPlaying) advanceQueue(state.nowPlaying.youtubeVideoId);
         },
+        onError: showDisplayVideoError,
         onAutoplayBlocked: showAudioActivation,
       },
     });
@@ -447,7 +492,7 @@ function displayQueueMarkup() {
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main><div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main><div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
