@@ -116,6 +116,32 @@ function speakDisplayTransition(current) {
     setTimeout(() => window.speechSynthesis.speak(utterance), index * 1450);
   });
 }
+function showAudioActivation() {
+  const overlay = document.querySelector('#audio-activation');
+  if (!overlay) return;
+  overlay.hidden = false;
+  const button = overlay.querySelector('#activate-audio');
+  if (button) button.onclick = () => {
+    displayPlayer?.unMute?.();
+    syncDisplayVolume();
+    window.speechSynthesis?.resume();
+    postYoutubeCommand('playVideo');
+    overlay.hidden = true;
+    localStorage.setItem('muxo-audio-enabled', 'true');
+  };
+}
+function ensureDisplayPlayback() {
+  postYoutubeCommand('playVideo');
+  setTimeout(() => {
+    if (!displayPlayer || displayTransitionActive) return;
+    const playerState = displayPlayer.getPlayerState?.();
+    if (playerState === window.YT?.PlayerState?.UNSTARTED || playerState === window.YT?.PlayerState?.CUED) {
+      displayPlayer.mute?.();
+      displayPlayer.playVideo?.();
+      setTimeout(() => { if (displayPlayer?.getPlayerState?.() === window.YT?.PlayerState?.PLAYING) showAudioActivation(); }, 700);
+    }
+  }, 900);
+}
 function finishDisplayTransition() {
   clearTimeout(displayTransitionTimer);
   displayTransitionTimer = null;
@@ -125,7 +151,7 @@ function finishDisplayTransition() {
   displayTransitionActive = false;
   const command = playbackState().command;
   if (command?.action === 'pause') postYoutubeCommand('pauseVideo');
-  else postYoutubeCommand('playVideo');
+  else ensureDisplayPlayback();
   lastAppliedPlaybackCommandId = command?.id ?? lastAppliedPlaybackCommandId;
   startPlaybackTelemetry();
 }
@@ -166,12 +192,13 @@ async function attachDisplayPlayer({ transition = false } = {}) {
             lastAppliedPlaybackCommandId = command.id;
             postPlaybackCommand(command);
             if (command.action === 'set-volume' && state.nowPlaying) postYoutubeCommand('playVideo');
-          } else if (state.nowPlaying) postYoutubeCommand('playVideo');
+          } else if (state.nowPlaying) ensureDisplayPlayback();
           startPlaybackTelemetry();
         },
         onStateChange: (event) => {
           if (event.data === window.YT.PlayerState.ENDED && state.nowPlaying) advanceQueue(state.nowPlaying.youtubeVideoId);
         },
+        onAutoplayBlocked: showAudioActivation,
       },
     });
   } catch (error) {
@@ -354,7 +381,7 @@ function displayQueueMarkup() {
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main><div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main><div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="eyebrow">${icon('mic_external_on')} A CONTINUACIÓN</div><div class="transition-brand">MUXO</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
