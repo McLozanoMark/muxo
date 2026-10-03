@@ -252,7 +252,12 @@ async function initData() {
     const sessionRef = doc(firebaseDb, SESSION_REF.split('/')[0], SESSION_REF.split('/')[1]);
     const snapshot = await getDoc(sessionRef);
     if (!snapshot.exists()) await setDoc(sessionRef, state);
-    onSnapshot(sessionRef, (next) => { if (next.exists()) { state = next.data(); render(); } }, () => notify('La conexión en vivo se interrumpió.'));
+    onSnapshot(sessionRef, (next) => {
+      if (!next.exists()) return;
+      state = next.data();
+      if (route() === 'waiter' && updateWaiterInPlace()) return;
+      render();
+    }, () => notify('La conexión en vivo se interrumpió.'));
   } catch (error) {
     console.error(error);
     const stored = localStorage.getItem(localKey);
@@ -462,6 +467,16 @@ function updateDisplayInPlace() {
   if (queue) queue.innerHTML = displayQueueMarkup();
   const count = display.querySelector('[data-display-count]');
   if (count) count.textContent = `${state.queue.length} turnos`;
+  return true;
+}
+function updateWaiterInPlace() {
+  const waiter = document.querySelector('.shell');
+  const searchInput = document.querySelector('#search-input');
+  if (!waiter || !searchInput) return false;
+  const queueCount = document.querySelector('#queue-count');
+  if (queueCount) queueCount.textContent = state.queue.length;
+  const badge = document.querySelector('.page-head .badge');
+  if (badge) badge.innerHTML = `${icon('queue_music')}${state.queue.length} en cola`;
   return true;
 }
 function render() {
