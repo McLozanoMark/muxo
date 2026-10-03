@@ -23,6 +23,7 @@ let lastAppliedPlaybackCommandId = null;
 let playbackTelemetryTimer = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
+let idleCommercialActive = false;
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) {
@@ -98,23 +99,56 @@ function startPlaybackTelemetry() {
     await setDoc(sessionDocument(), { playback }, { merge: true });
   }, 2000);
 }
-function speakDisplayTransition(current) {
+function stopIdleCommercialLoop() {
+  idleCommercialActive = false;
+  window.speechSynthesis?.cancel();
+}
+function startIdleCommercialLoop() {
+  if (idleCommercialActive || state.nowPlaying) return;
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  idleCommercialActive = true;
+  const commercial = 'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.';
+  const speak = () => {
+    if (!idleCommercialActive || state.nowPlaying) return;
+    const utterance = new SpeechSynthesisUtterance(commercial);
+    utterance.lang = 'es-PE';
+    utterance.rate = .92;
+    utterance.pitch = .95;
+    utterance.onend = () => setTimeout(speak, 350);
+    utterance.onerror = () => setTimeout(speak, 700);
+    window.speechSynthesis.speak(utterance);
+  };
+  speak();
+}
+function speakDisplayTransition(current) {
+  stopIdleCommercialLoop();
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+    finishDisplayTransition();
+    return;
+  }
   window.speechSynthesis.cancel();
-  const announcement = `${current.singerName}. ${current.songTitle}. Mesa ${current.tableNumber}.`;
+  const announcement = `Mesa ${current.tableNumber} canta ${current.singerName}. El tema ${current.songTitle}.`;
   const phrases = [
     'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.',
     announcement,
     announcement,
-    announcement,
   ];
-  phrases.forEach((phrase, index) => {
-    const utterance = new SpeechSynthesisUtterance(phrase);
+  let index = 0;
+  const speakNext = () => {
+    if (!displayTransitionActive) return;
+    if (index >= phrases.length) {
+      finishDisplayTransition();
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(phrases[index++]);
     utterance.lang = 'es-PE';
     utterance.rate = .92;
     utterance.pitch = .95;
-    setTimeout(() => window.speechSynthesis.speak(utterance), index * 1450);
-  });
+    utterance.onend = () => setTimeout(speakNext, 120);
+    utterance.onerror = () => setTimeout(speakNext, 120);
+    window.speechSynthesis.speak(utterance);
+  };
+  speakNext();
 }
 function showAudioActivation() {
   const overlay = document.querySelector('#audio-activation');
@@ -157,6 +191,7 @@ function finishDisplayTransition() {
 }
 function beginDisplayTransition(current) {
   displayTransitionActive = true;
+  stopIdleCommercialLoop();
   postYoutubeCommand('pauseVideo');
   const overlay = document.querySelector('#display-transition');
   if (overlay) {
@@ -166,8 +201,6 @@ function beginDisplayTransition(current) {
     overlay.hidden = false;
   }
   speakDisplayTransition(current);
-  clearTimeout(displayTransitionTimer);
-  displayTransitionTimer = setTimeout(finishDisplayTransition, 7000);
 }
 async function attachDisplayPlayer({ transition = false } = {}) {
   const iframe = document.querySelector('#display-video');
@@ -409,9 +442,16 @@ function render() {
     stopPlaybackTelemetry();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
+    idleCommercialActive = false;
     displayTransitionActive = false;
   }
-  if (currentRoute === 'display' && updateDisplayInPlace()) { attachDisplayPlayer(); applyPlaybackCommand(playbackState().command); return; }
+  if (currentRoute === 'display' && updateDisplayInPlace()) {
+    if (state.nowPlaying) stopIdleCommercialLoop();
+    else startIdleCommercialLoop();
+    attachDisplayPlayer();
+    applyPlaybackCommand(playbackState().command);
+    return;
+  }
   const previousDisplay = document.querySelector('.display');
   const previousVideoId = previousDisplay?.dataset.videoId ?? '';
   const nextVideoId = state.nowPlaying?.youtubeVideoId ?? '';
@@ -419,7 +459,12 @@ function render() {
   app.innerHTML = currentRoute === 'operator' ? operatorView() : currentRoute === 'display' ? displayView(transition) : waiterView();
   if (currentRoute === 'waiter') { document.querySelector('#search-button')?.addEventListener('click', searchYoutube); document.querySelector('#search-input')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchYoutube(); }); renderSelection(); }
   if (currentRoute === 'operator') bindOperator();
-  if (currentRoute === 'display') { attachDisplayPlayer({ transition }); if (!transition) applyPlaybackCommand(playbackState().command); }
+  if (currentRoute === 'display') {
+    if (state.nowPlaying) stopIdleCommercialLoop();
+    else startIdleCommercialLoop();
+    attachDisplayPlayer({ transition });
+    if (!transition) applyPlaybackCommand(playbackState().command);
+  }
 }
 window.addEventListener('hashchange', render);
 initData();
