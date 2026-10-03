@@ -100,6 +100,7 @@ function startPlaybackTelemetry() {
   }, 2000);
 }
 function stopIdleCommercialLoop() {
+  if (!idleCommercialActive) return;
   idleCommercialActive = false;
   window.speechSynthesis?.cancel();
 }
