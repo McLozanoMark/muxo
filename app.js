@@ -5,7 +5,7 @@ const YOUTUBE_API_KEY = 'AIzaSyDs31A8sNQqSVESILNKv93qWLxEAq-33E4';
 const FIREBASE_CONFIG = { apiKey: 'AIzaSyBwySV_jaJoQcow6u494XH7WkFmMY3eyG0', authDomain: 'muxo-karaoke.firebaseapp.com', projectId: 'muxo-karaoke', storageBucket: 'muxo-karaoke.firebasestorage.app', messagingSenderId: '290765040154', appId: '1:290765040154:web:eb204766dcdc3c58437fa3' };
 const SESSION_REF = 'sessions/muxo-main';
 const PRIORITY_CHANNEL_NAME = 'Karaoke Entre Panas';
-const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/keyframe_audio-inspirational-cinematic-ambient-after-the-storm-133540.mp3';
+const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/funkymenuloop-longer.mp3';
 const demoQueue = [
   { id: 'demo-1', tableNumber: '7', singerName: 'Diego', songTitle: 'Bohemian Rhapsody — Queen (Karaoke)', youtubeVideoId: 'fJ9rUzIMcZQ', thumbnail: 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', channelTitle: 'Karaoke Version', status: 'queued', createdAt: Date.now() - 180000 },
   { id: 'demo-2', tableNumber: '3', singerName: 'Andrea', songTitle: 'Smells Like Teen Spirit — Nirvana (Karaoke)', youtubeVideoId: 'hTWKbfoikeg', thumbnail: 'https://i.ytimg.com/vi/hTWKbfoikeg/hqdefault.jpg', channelTitle: 'Sing King Karaoke', status: 'queued', createdAt: Date.now() - 120000 },
@@ -179,6 +179,15 @@ function stopTransitionAmbientAudio() {
   transitionAmbientAudio.pause();
   transitionAmbientAudio.currentTime = 0;
 }
+function refreshMarquees(root = document) {
+  root?.querySelectorAll?.('.text-marquee').forEach((marquee) => {
+    const content = marquee.querySelector('[data-marquee-content]');
+    if (!content) return;
+    const distance = Math.max(0, content.getBoundingClientRect().width - marquee.clientWidth);
+    marquee.style.setProperty('--marquee-distance', `${distance}px`);
+    marquee.classList.toggle('is-overflowing', distance > 4);
+  });
+}
 function stopIdleCommercialLoop() {
   if (!idleCommercialActive) return;
   idleCommercialActive = false;
@@ -299,8 +308,9 @@ function beginDisplayTransition(current) {
   if (overlay) {
     overlay.querySelector('[data-transition-singer]').textContent = current.singerName;
     overlay.querySelector('[data-transition-song]').textContent = current.songTitle;
-    overlay.querySelector('[data-transition-table]').innerHTML = `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}`;
+    overlay.querySelector('[data-transition-table]').textContent = current.tableNumber;
     overlay.hidden = false;
+    refreshMarquees(overlay);
   }
   startTransitionAmbientAudio();
   speakDisplayTransition(current);
@@ -627,7 +637,7 @@ function displayVisualizerMarkup() {
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 data-display-singer>${escapeHtml(current.singerName)}</h1><div class="display-song" data-display-song>${escapeHtml(current.songTitle)}</div><span class="table-pill" data-display-table>${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="transition-record"><div class="record-disc"><span>MUXO</span></div><div class="transition-copy"><div class="eyebrow">${icon('mic_external_on')} PRÓXIMA VOZ</div><h2 data-transition-singer>${escapeHtml(current?.singerName ?? '')}</h2><p data-transition-song>${escapeHtml(current?.songTitle ?? '')}</p><span class="table-pill" data-transition-table>${current ? `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}` : ''}</span></div></div><div class="transition-side"><div class="transition-brand"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>El escenario es tuyo.</p></div></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><div class="display-table-label">MESA</div><h1 data-display-table>${escapeHtml(current.tableNumber)}</h1><div class="display-song text-marquee"><span data-display-song data-marquee-content>${escapeHtml(current.songTitle)}</span></div><div class="display-singer-label">CANTA</div><div class="display-singer" data-display-singer>${escapeHtml(current.singerName)}</div></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="transition-record"><div class="record-disc"><span>MUXO</span></div><div class="transition-copy"><div class="eyebrow">${icon('mic_external_on')} PRÓXIMA VOZ</div><div class="transition-table-label">MESA</div><h2 data-transition-table>${escapeHtml(current?.tableNumber ?? '')}</h2><div class="transition-marquee text-marquee"><p data-transition-song data-marquee-content>${escapeHtml(current?.songTitle ?? '')}</p></div><div class="transition-singer-label">CANTA</div><div class="transition-singer" data-transition-singer>${escapeHtml(current?.singerName ?? '')}</div></div></div><div class="transition-side"><div class="transition-brand"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>El escenario es tuyo.</p></div></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo"><span class="brand-mark"><i></i><i></i><i></i></span>MUXO</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
@@ -641,8 +651,9 @@ function updateDisplayInPlace() {
     const table = display.querySelector('[data-display-table]');
     if (singer) singer.textContent = current.singerName;
     if (song) song.textContent = current.songTitle;
-    if (table) table.innerHTML = `${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}`;
+    if (table) table.textContent = current.tableNumber;
   }
+  refreshMarquees(display);
   const queue = display.querySelector('[data-display-queue]');
   if (queue) queue.innerHTML = displayQueueMarkup();
   const count = display.querySelector('[data-display-count]');
@@ -693,6 +704,7 @@ function render() {
   if (currentRoute === 'display') {
     if (state.nowPlaying) stopIdleCommercialLoop();
     else startIdleCommercialLoop();
+    refreshMarquees(document.querySelector('.display'));
     attachDisplayPlayer({ transition });
     if (!transition) applyPlaybackCommand(playbackState().command);
   }
