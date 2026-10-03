@@ -316,6 +316,33 @@ function operatorView() {
   return `<div class="shell">${nav('operator')}<main class="page"><div class="page-head"><div><div class="eyebrow">CENTRAL DEL ENCARGADO</div><h1>La cola de esta noche</h1><p>Controla el ritmo del show. Solo el encargado puede avanzar el turno.</p></div><span class="badge">${icon('queue_music')}${state.queue.length} turnos pendientes</span></div><div class="operator-grid"><section class="card now-card">${current ? `<div><div class="now-track"><img class="now-art" src="${escapeHtml(current.thumbnail)}" alt=""/><div class="now-track-copy"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA <span class="play-status">${icon(playbackState().command?.action === 'pause' ? 'pause_circle' : 'play_circle')} ${playbackLabel()}</span></div><h2>${escapeHtml(current.singerName)}</h2><div class="song-name">${escapeHtml(current.songTitle)}</div></div></div><div class="playback-controls"><button id="pause-button" class="button secondary icon-action" title="Pausar" aria-label="Pausar">${icon('pause')}<span>Pausar</span></button><button id="play-button" class="button secondary icon-action" title="Reproducir" aria-label="Reproducir">${icon('play_arrow')}<span>Reproducir</span></button><button id="restart-button" class="button secondary icon-action" title="Reproducir desde cero" aria-label="Reproducir desde cero">${icon('restart_alt')}<span>Desde cero</span></button><div class="volume-control"><button id="volume-down-button" class="icon-button" title="Bajar volumen" aria-label="Bajar volumen">${icon('volume_down')}</button><span id="volume-label">Volumen ${playbackVolume()}%</span><button id="volume-up-button" class="icon-button" title="Subir volumen" aria-label="Subir volumen">${icon('volume_up')}</button></div></div><div class="playback-progress"><div class="progress-meta"><span>${formatTime(position)}</span><span>${duration > 0 ? `-${formatTime(Math.max(0, duration - position))}` : '--:--'}</span></div><div class="progress-track" role="progressbar" aria-label="Progreso de la canción" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><span style="width:${progress}%"></span></div></div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span><div class="toolbar"><button id="absent-button" class="button secondary icon-action" title="Marcar como ausente" aria-label="Marcar como ausente">${icon('person_off')}<span>No está</span></button><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Siguiente</span></button></div></div>` : `<div><div class="eyebrow">TURNO ACTUAL</div><h2>Listo para el próximo turno</h2><div class="song-name">La pantalla mostrará la siguiente canción cuando avances.</div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}${state.queue.length} EN ESPERA</span><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Reproducir siguiente</span></button></div>`}</section><section class="card queue-card"><div class="section-title"><h2>${icon('queue_music')}Próximos turnos</h2><span class="muted">${state.queue.length}</span></div><div id="queue-list">${queueRows()}</div></section></div></main></div>`;
 }
 function queueRows() { return state.queue.length ? state.queue.map((request,index) => `<div class="queue-row" draggable="true" data-queue-id="${request.id}" title="Arrastra para reordenar"><span class="queue-number">${String(index+1).padStart(2,'0')}</span><img class="queue-thumb" src="${escapeHtml(request.thumbnail)}" alt="" loading="lazy"/><div><div class="queue-title">${escapeHtml(request.songTitle)}</div><div class="queue-meta">${escapeHtml(request.singerName)} · ${icon('table_restaurant')} Mesa ${escapeHtml(request.tableNumber)}</div></div><div class="row-actions"><span class="drag-handle" aria-hidden="true">${icon('drag_indicator')}</span><button class="icon-button danger remove" title="Quitar de la cola" aria-label="Quitar de la cola" data-id="${request.id}">${icon('delete')}</button></div></div>`).join('') : '<div class="empty">No hay canciones en espera.</div>'; }
+function captureWaiterFormState() {
+  const fields = ['search-input', 'table-input', 'singer-input'];
+  const activeElement = document.activeElement;
+  return fields.reduce((snapshot, fieldId) => {
+    const field = document.querySelector(`#${fieldId}`);
+    if (!field) return snapshot;
+    snapshot[fieldId] = {
+      value: field.value,
+      focused: field === activeElement,
+      selectionStart: field.selectionStart,
+      selectionEnd: field.selectionEnd,
+    };
+    return snapshot;
+  }, {});
+}
+function restoreWaiterFormState(snapshot) {
+  Object.entries(snapshot ?? {}).forEach(([fieldId, fieldState]) => {
+    const field = document.querySelector(`#${fieldId}`);
+    if (!field) return;
+    field.value = fieldState.value;
+    if (!fieldState.focused) return;
+    field.focus();
+    if (typeof field.setSelectionRange === 'function' && fieldState.selectionStart !== null && fieldState.selectionEnd !== null) {
+      field.setSelectionRange(fieldState.selectionStart, fieldState.selectionEnd);
+    }
+  });
+}
 function reorderQueue(draggedId, targetId) {
   if (!draggedId || !targetId || draggedId === targetId) return;
   const from = state.queue.findIndex((item) => item.id === draggedId);
@@ -439,6 +466,7 @@ function updateDisplayInPlace() {
 }
 function render() {
   const currentRoute = route();
+  const waiterFormState = currentRoute === 'waiter' ? captureWaiterFormState() : null;
   if (currentRoute !== 'display') {
     stopPlaybackTelemetry();
     clearTimeout(displayTransitionTimer);
@@ -458,7 +486,12 @@ function render() {
   const nextVideoId = state.nowPlaying?.youtubeVideoId ?? '';
   const transition = currentRoute === 'display' && Boolean(previousDisplay && nextVideoId && previousVideoId !== nextVideoId);
   app.innerHTML = currentRoute === 'operator' ? operatorView() : currentRoute === 'display' ? displayView(transition) : waiterView();
-  if (currentRoute === 'waiter') { document.querySelector('#search-button')?.addEventListener('click', searchYoutube); document.querySelector('#search-input')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchYoutube(); }); renderSelection(); }
+  if (currentRoute === 'waiter') {
+    document.querySelector('#search-button')?.addEventListener('click', searchYoutube);
+    document.querySelector('#search-input')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchYoutube(); });
+    renderSelection();
+    restoreWaiterFormState(waiterFormState);
+  }
   if (currentRoute === 'operator') bindOperator();
   if (currentRoute === 'display') {
     if (state.nowPlaying) stopIdleCommercialLoop();
