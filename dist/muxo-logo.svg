@@ -1,49 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 130" role="img" aria-labelledby="muxo-logo-title muxo-logo-description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 333 45" role="img" aria-labelledby="muxo-logo-title muxo-logo-description">
   <title id="muxo-logo-title">Muxo</title>
-  <desc id="muxo-logo-description">Imagotipo de tres barras diagonales y wordmark Muxo con animación sutil.</desc>
-  <defs>
-    <linearGradient id="muxo-lime" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#e7ff83"/>
-      <stop offset=".52" stop-color="#c9f52b"/>
-      <stop offset="1" stop-color="#9fc31e"/>
-    </linearGradient>
-    <linearGradient id="muxo-white" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8e3eb"/>
-    </linearGradient>
-    <linearGradient id="muxo-sheen" gradientUnits="userSpaceOnUse" x1="80" y1="0" x2="150" y2="0">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset=".45" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset=".5" stop-color="#ffffff" stop-opacity=".88"/>
-      <stop offset=".56" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-      <animate attributeName="x1" values="80;700;80" dur="7.2s" repeatCount="indefinite"/>
-      <animate attributeName="x2" values="150;770;150" dur="7.2s" repeatCount="indefinite"/>
-    </linearGradient>
-    <filter id="muxo-soft-glow" x="-30%" y="-35%" width="160%" height="170%">
-      <feGaussianBlur stdDeviation="2.2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <clipPath id="muxo-word-clip">
-      <path d="M174 96V24h27l24 29 24-29h27v72h-31V66l-20 22h-1l-20-22v30Zm115-72h32v40c0 9 4 14 12 14s12-5 12-14V24h32v44c0 21-16 31-44 31s-44-10-44-31Zm114 0h34l15 19 15-19h35l-31 35 31 37h-35l-15-21-15 21h-34l31-37Zm137 0h54q22 0 22 22v28q0 22-22 22h-54q-22 0-22-22V46q0-22 22-22Zm8 27q-5 0-5 5v8q0 5 5 5h38q5 0 5-5v-8q0-5-5-5Z" fill-rule="evenodd"/>
-    </clipPath>
-  </defs>
-
-  <g fill="url(#muxo-lime)" filter="url(#muxo-soft-glow)" stroke="url(#muxo-lime)" stroke-width="32" stroke-linecap="round">
-    <path d="M34 87 64 28">
-      <animateTransform attributeName="transform" type="translate" values="0 0;0 -1.5;0 0;0 .7;0 0" dur="4.8s" repeatCount="indefinite"/>
-    </path>
-    <path d="M79 91 119 17">
-      <animateTransform attributeName="transform" type="translate" values="0 0;0 .8;0 0;0 -1.8;0 0" dur="5.5s" begin="-.8s" repeatCount="indefinite"/>
-    </path>
-    <path d="M127 96 172 10">
-      <animateTransform attributeName="transform" type="translate" values="0 0;0 -1.1;0 0;0 1.3;0 0" dur="5.1s" begin="-1.5s" repeatCount="indefinite"/>
-    </path>
+  <desc id="muxo-logo-description">Imagotipo de tres barras verdes junto al wordmark Muxo blanco.</desc>
+  <g fill="none" stroke="#c9f52b" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 36 30 9"/>
+    <path d="M31 36 54 6"/>
+    <path d="M55 36 78 6"/>
   </g>
-
-  <path d="M174 96V24h27l24 29 24-29h27v72h-31V66l-20 22h-1l-20-22v30Zm115-72h32v40c0 9 4 14 12 14s12-5 12-14V24h32v44c0 21-16 31-44 31s-44-10-44-31Zm114 0h34l15 19 15-19h35l-31 35 31 37h-35l-15-21-15 21h-34l31-37Zm137 0h54q22 0 22 22v28q0 22-22 22h-54q-22 0-22-22V46q0-22 22-22Zm8 27q-5 0-5 5v8q0 5 5 5h38q5 0 5-5v-8q0-5-5-5Z" fill="url(#muxo-white)" fill-rule="evenodd"/>
-  <rect x="170" y="14" width="450" height="88" fill="url(#muxo-sheen)" clip-path="url(#muxo-word-clip)" opacity=".58"/>
+  <g fill="#fff" fill-rule="evenodd">
+    <path d="M84 0h15l14 15 14-15h15v45h-14V21l-15 14h-1L98 21v24H84Zm64 0h15v27c0 6 3 9 9 9s9-3 9-9V0h15v28c0 11-8 17-24 17s-24-6-24-17Zm53 0h17l10 13 10-13h17l-19 22 19 23h-17l-10-14-10 14h-17l19-23Zm63 0h45q24 0 24 22.5T309 45h-45q-24 0-24-22.5T264 0Zm4 13q-8 0-8 9.5t8 9.5h37q8 0 8-9.5t-8-9.5Z"/>
+  </g>
 </svg>
