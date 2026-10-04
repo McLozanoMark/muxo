@@ -53,7 +53,7 @@ function prioritizeSearchResults(results) {
   const priority = normalizeChannelName(PRIORITY_CHANNEL_NAME);
   return [...results].sort((first, second) => Number(normalizeChannelName(second.channelTitle).includes(priority)) - Number(normalizeChannelName(first.channelTitle).includes(priority)));
 }
-function logoMarkup(className = '', alt = 'Muxo') { return `<img class="muxo-logo ${className}" src="muxo-logo.svg" alt="${escapeHtml(alt)}"/>`; }
+function logoMarkup(className = '', alt = 'Muxo') { return `<img class="muxo-logo ${className}" src="muxo-logo.png" alt="${escapeHtml(alt)}"/>`; }
 function icon(name) { return `<span class="material-symbols-rounded" aria-hidden="true">${name}</span>`; }
 function route() { return (location.hash.replace('#', '') || 'waiter').split('?')[0]; }
 function id() { return crypto.randomUUID?.() || `muxo-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
