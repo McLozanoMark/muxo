@@ -6,6 +6,7 @@ const FIREBASE_CONFIG = { apiKey: 'AIzaSyBwySV_jaJoQcow6u494XH7WkFmMY3eyG0', aut
 const SESSION_REF = 'sessions/muxo-main';
 const PRIORITY_CHANNEL_NAME = 'Karaoke Entre Panas';
 const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/funkymenuloop-longer.mp3';
+const COMMERCIAL_AUDIO_URL = './muxo-commercial.m4a';
 const demoQueue = [
   { id: 'demo-1', tableNumber: '7', singerName: 'Diego', songTitle: 'Bohemian Rhapsody — Queen (Karaoke)', youtubeVideoId: 'fJ9rUzIMcZQ', thumbnail: 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', channelTitle: 'Karaoke Version', status: 'queued', createdAt: Date.now() - 180000 },
   { id: 'demo-2', tableNumber: '3', singerName: 'Andrea', songTitle: 'Smells Like Teen Spirit — Nirvana (Karaoke)', youtubeVideoId: 'hTWKbfoikeg', thumbnail: 'https://i.ytimg.com/vi/hTWKbfoikeg/hqdefault.jpg', channelTitle: 'Sing King Karaoke', status: 'queued', createdAt: Date.now() - 120000 },
@@ -32,6 +33,8 @@ let displayTransitionActive = false;
 let idleCommercialActive = false;
 let displayVideoError = false;
 let transitionAmbientAudio = null;
+let commercialAudio = null;
+let commercialPlaybackId = 0;
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) {
@@ -180,6 +183,35 @@ function stopTransitionAmbientAudio() {
   transitionAmbientAudio.pause();
   transitionAmbientAudio.currentTime = 0;
 }
+function getCommercialAudio() {
+  if (!commercialAudio) {
+    commercialAudio = new Audio(COMMERCIAL_AUDIO_URL);
+    commercialAudio.preload = 'auto';
+    commercialAudio.volume = 1;
+  }
+  return commercialAudio;
+}
+function stopCommercialAudio() {
+  commercialPlaybackId += 1;
+  if (!commercialAudio) return;
+  commercialAudio.pause();
+  commercialAudio.currentTime = 0;
+  commercialAudio.onended = null;
+  commercialAudio.onerror = null;
+}
+function playCommercialAudio(onFinished) {
+  const audio = getCommercialAudio();
+  const playbackId = ++commercialPlaybackId;
+  audio.pause();
+  audio.currentTime = 0;
+  const finish = () => {
+    if (playbackId === commercialPlaybackId) onFinished?.();
+  };
+  audio.onended = finish;
+  audio.onerror = finish;
+  const playRequest = audio.play();
+  playRequest?.catch?.(finish);
+}
 function refreshMarquees(root = document) {
   root?.querySelectorAll?.('.text-marquee').forEach((marquee) => {
     const content = marquee.querySelector('[data-marquee-content]');
@@ -190,33 +222,23 @@ function refreshMarquees(root = document) {
   });
 }
 function stopIdleCommercialLoop() {
-  if (!idleCommercialActive) return;
   idleCommercialActive = false;
   window.speechSynthesis?.cancel();
+  stopCommercialAudio();
 }
 function startIdleCommercialLoop() {
   if (idleCommercialActive || state.nowPlaying) return;
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
   idleCommercialActive = true;
-  const commercial = 'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.';
-  const speak = () => {
+  const play = () => {
     if (!idleCommercialActive || state.nowPlaying) return;
-    const utterance = createSpeechUtterance(commercial);
-    utterance.onend = () => setTimeout(speak, 350);
-    utterance.onerror = () => setTimeout(speak, 700);
-    window.speechSynthesis.speak(utterance);
+    playCommercialAudio(() => setTimeout(play, 350));
   };
-  speak();
+  play();
 }
 function speakDisplayTransition(current) {
   stopIdleCommercialLoop();
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
-    finishDisplayTransition();
-    return;
-  }
-  window.speechSynthesis.cancel();
+  window.speechSynthesis?.cancel();
   const phrases = [
-    { text: 'Esto es Muxo. Disfruta tus canciones favoritas cantando en Muxo.', pauseAfter: 240 },
     { text: `Mesa ${current.tableNumber}.`, pauseAfter: 180 },
     { text: `Canta ${current.singerName}.`, pauseAfter: 180 },
     { text: `El tema ${current.songTitle}.`, pauseAfter: 340 },
@@ -224,20 +246,30 @@ function speakDisplayTransition(current) {
     { text: `Canta ${current.singerName}.`, pauseAfter: 180 },
     { text: `El tema ${current.songTitle}.`, pauseAfter: 340 },
   ];
-  let index = 0;
-  const speakNext = () => {
-    if (!displayTransitionActive) return;
-    if (index >= phrases.length) {
+  const speakDetails = () => {
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
       finishDisplayTransition();
       return;
     }
-    const phrase = phrases[index++];
-    const utterance = createSpeechUtterance(phrase.text);
-    utterance.onend = () => setTimeout(speakNext, phrase.pauseAfter);
-    utterance.onerror = () => setTimeout(speakNext, phrase.pauseAfter);
-    window.speechSynthesis.speak(utterance);
+    let index = 0;
+    const speakNext = () => {
+      if (!displayTransitionActive) return;
+      if (index >= phrases.length) {
+        finishDisplayTransition();
+        return;
+      }
+      const phrase = phrases[index++];
+      const utterance = createSpeechUtterance(phrase.text);
+      utterance.onend = () => setTimeout(speakNext, phrase.pauseAfter);
+      utterance.onerror = () => setTimeout(speakNext, phrase.pauseAfter);
+      window.speechSynthesis.speak(utterance);
+    };
+    speakNext();
   };
-  speakNext();
+  playCommercialAudio(() => {
+    if (!displayTransitionActive) return;
+    setTimeout(speakDetails, 220);
+  });
 }
 function showDisplayVideoError() {
   displayVideoError = true;
@@ -291,6 +323,7 @@ function finishDisplayTransition() {
   clearTimeout(displayTransitionTimer);
   displayTransitionTimer = null;
   window.speechSynthesis?.cancel();
+  stopCommercialAudio();
   stopTransitionAmbientAudio();
   const overlay = document.querySelector('#display-transition');
   if (overlay) overlay.hidden = true;
@@ -677,6 +710,7 @@ function render() {
   if (currentRoute !== 'display') {
     stopPlaybackTelemetry();
     stopDisplayVisualizer();
+    stopCommercialAudio();
     stopTransitionAmbientAudio();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
