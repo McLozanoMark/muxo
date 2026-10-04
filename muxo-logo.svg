@@ -1,49 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 88" role="img" aria-labelledby="muxo-logo-title muxo-logo-description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 130" role="img" aria-labelledby="muxo-logo-title muxo-logo-description">
   <title id="muxo-logo-title">Muxo</title>
-  <desc id="muxo-logo-description">Tres barras verdes junto a la palabra Muxo con animación de levitación y brillo.</desc>
+  <desc id="muxo-logo-description">Imagotipo de tres barras diagonales y wordmark Muxo con animación sutil.</desc>
   <defs>
-    <linearGradient id="muxo-bars" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="muxo-lime" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#e7ff83"/>
-      <stop offset=".48" stop-color="#c9f52b"/>
-      <stop offset="1" stop-color="#8db516"/>
+      <stop offset=".52" stop-color="#c9f52b"/>
+      <stop offset="1" stop-color="#9fc31e"/>
     </linearGradient>
-    <linearGradient id="muxo-word" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="muxo-white" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#ded7e2"/>
+      <stop offset="1" stop-color="#e8e3eb"/>
     </linearGradient>
-    <linearGradient id="muxo-sheen" gradientUnits="userSpaceOnUse" x1="-120" y1="0" x2="-38" y2="0">
+    <linearGradient id="muxo-sheen" gradientUnits="userSpaceOnUse" x1="80" y1="0" x2="150" y2="0">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
       <stop offset=".45" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset=".5" stop-color="#ffffff" stop-opacity=".85"/>
+      <stop offset=".5" stop-color="#ffffff" stop-opacity=".88"/>
       <stop offset=".56" stop-color="#ffffff" stop-opacity="0"/>
       <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-      <animate attributeName="x1" values="-120;430;-120" dur="6.8s" repeatCount="indefinite"/>
-      <animate attributeName="x2" values="-38;512;-38" dur="6.8s" repeatCount="indefinite"/>
+      <animate attributeName="x1" values="80;700;80" dur="7.2s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values="150;770;150" dur="7.2s" repeatCount="indefinite"/>
     </linearGradient>
-    <filter id="muxo-glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+    <filter id="muxo-soft-glow" x="-30%" y="-35%" width="160%" height="170%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
     <clipPath id="muxo-word-clip">
-      <text x="98" y="62" font-family="Arial, Helvetica, sans-serif" font-size="47" font-weight="700" letter-spacing="8">MUXO</text>
+      <path d="M174 96V24h27l24 29 24-29h27v72h-31V66l-20 22h-1l-20-22v30Zm115-72h32v40c0 9 4 14 12 14s12-5 12-14V24h32v44c0 21-16 31-44 31s-44-10-44-31Zm114 0h34l15 19 15-19h35l-31 35 31 37h-35l-15-21-15 21h-34l31-37Zm137 0h54q22 0 22 22v28q0 22-22 22h-54q-22 0-22-22V46q0-22 22-22Zm8 27q-5 0-5 5v8q0 5 5 5h38q5 0 5-5v-8q0-5-5-5Z" fill-rule="evenodd"/>
     </clipPath>
   </defs>
 
-  <g fill="url(#muxo-bars)" filter="url(#muxo-glow)">
-    <path d="M18 70h14l22-52H40z">
-      <animateTransform attributeName="transform" type="translate" values="0 0;0 -1.5;0 0;0 .7;0 0" dur="4.8s" begin="0s" repeatCount="indefinite"/>
+  <g fill="url(#muxo-lime)" filter="url(#muxo-soft-glow)" stroke="url(#muxo-lime)" stroke-width="32" stroke-linecap="round">
+    <path d="M34 87 64 28">
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 -1.5;0 0;0 .7;0 0" dur="4.8s" repeatCount="indefinite"/>
     </path>
-    <path d="M40 70h14l22-52H62z">
+    <path d="M79 91 119 17">
       <animateTransform attributeName="transform" type="translate" values="0 0;0 .8;0 0;0 -1.8;0 0" dur="5.5s" begin="-.8s" repeatCount="indefinite"/>
     </path>
-    <path d="M62 70h14l22-52H84z">
+    <path d="M127 96 172 10">
       <animateTransform attributeName="transform" type="translate" values="0 0;0 -1.1;0 0;0 1.3;0 0" dur="5.1s" begin="-1.5s" repeatCount="indefinite"/>
     </path>
   </g>
 
-  <text x="98" y="62" fill="url(#muxo-word)" font-family="Arial, Helvetica, sans-serif" font-size="47" font-weight="700" letter-spacing="8">MUXO</text>
-  <rect x="98" y="17" width="218" height="52" fill="url(#muxo-sheen)" clip-path="url(#muxo-word-clip)" opacity=".6"/>
+  <path d="M174 96V24h27l24 29 24-29h27v72h-31V66l-20 22h-1l-20-22v30Zm115-72h32v40c0 9 4 14 12 14s12-5 12-14V24h32v44c0 21-16 31-44 31s-44-10-44-31Zm114 0h34l15 19 15-19h35l-31 35 31 37h-35l-15-21-15 21h-34l31-37Zm137 0h54q22 0 22 22v28q0 22-22 22h-54q-22 0-22-22V46q0-22 22-22Zm8 27q-5 0-5 5v8q0 5 5 5h38q5 0 5-5v-8q0-5-5-5Z" fill="url(#muxo-white)" fill-rule="evenodd"/>
+  <rect x="170" y="14" width="450" height="88" fill="url(#muxo-sheen)" clip-path="url(#muxo-word-clip)" opacity=".58"/>
 </svg>

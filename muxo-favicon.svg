@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="muxo-favicon-title">
+  <title id="muxo-favicon-title">Muxo</title>
+  <rect width="64" height="64" rx="16" fill="#08090d"/>
+  <g fill="none" stroke="#c9f52b" stroke-width="8" stroke-linecap="round">
+    <path d="M14 44 25 20">
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 -1;0 0;0 .5;0 0" dur="4.8s" repeatCount="indefinite"/>
+    </path>
+    <path d="M29 44 40 20">
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 .6;0 0;0 -1.1;0 0" dur="5.5s" begin="-.8s" repeatCount="indefinite"/>
+    </path>
+    <path d="M44 44 55 20">
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 -.8;0 0;0 .9;0 0" dur="5.1s" begin="-1.5s" repeatCount="indefinite"/>
+    </path>
+  </g>
+</svg>
