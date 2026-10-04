@@ -26,11 +26,8 @@ a { color: inherit; text-decoration: none; }
 .material-symbols-rounded { display: inline-flex; align-items: center; justify-content: center; width: 1.2em; height: 1.2em; font-size: 1.16em; line-height: 1; font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24; }
 .shell { min-height: 100vh; }
 .brand { display: inline-flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: .18em; }
-.brand-mark { display: inline-flex; gap: 3px; align-items: flex-end; }
-.brand-mark i { display: block; width: 5px; background: var(--lime); border-radius: 8px; transform: skew(-25deg); }
-.brand-mark i:nth-child(1) { height: 17px; }
-.brand-mark i:nth-child(2) { height: 25px; }
-.brand-mark i:nth-child(3) { height: 20px; }
+.muxo-logo { display: block; width: 132px; height: auto; overflow: visible; }
+.brand-logo { width: 132px; }
 .topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 clamp(20px, 4vw, 64px); background: #0b090ee8; border-bottom: 1px solid var(--line-soft); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 5; }
 .top-meta { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font: 12px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px var(--lime); }
@@ -208,12 +205,8 @@ a { color: inherit; text-decoration: none; }
 .display-video-error { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 42%, #32183df2 0, #050307f8 64%), #050307f8; }
 .display-video-error[hidden] { display: none; }
 .display-video-error-card { width: min(680px, 88vw); padding: 38px 24px; text-align: center; }
-.display-error-logo { display: inline-flex; align-items: center; gap: 15px; color: var(--text); font-size: clamp(32px, 5vw, 64px); font-weight: 700; letter-spacing: .18em; }
-.display-error-logo .brand-mark { gap: 5px; }
-.display-error-logo .brand-mark i { width: 9px; }
-.display-error-logo .brand-mark i:nth-child(1) { height: 30px; }
-.display-error-logo .brand-mark i:nth-child(2) { height: 46px; }
-.display-error-logo .brand-mark i:nth-child(3) { height: 36px; }
+.display-error-logo { display: inline-flex; align-items: center; justify-content: center; }
+.error-logo { width: min(380px, 72vw); }
 .display-video-error-card p { margin: 24px 0 0; color: #d7cbdc; font-size: clamp(16px, 2vw, 25px); line-height: 1.35; }
 .audio-activation { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; padding: 24px; background: #050307b8; backdrop-filter: blur(8px); }
 .audio-activation[hidden] { display: none; }
@@ -233,11 +226,8 @@ a { color: inherit; text-decoration: none; }
 .transition-singer-label { margin-top: 22px; color: #aaa0b0; font-size: 10px; }
 .transition-singer { margin-top: 4px; color: var(--text); font-size: clamp(20px, 2.6vw, 34px); font-weight: 600; line-height: 1.1; }
 .transition-side { display: flex; flex-direction: column; justify-content: center; margin-left: clamp(20px, 4vw, 54px); padding-left: clamp(20px, 4vw, 54px); border-left: 1px solid #ffffff1c; }
-.transition-brand { display: inline-flex; align-items: flex-end; gap: 12px; color: var(--text); font-size: clamp(28px, 4vw, 52px); font-weight: 700; letter-spacing: .18em; }
-.transition-brand .brand-mark i { width: 7px; }
-.transition-brand .brand-mark i:nth-child(1) { height: 24px; }
-.transition-brand .brand-mark i:nth-child(2) { height: 38px; }
-.transition-brand .brand-mark i:nth-child(3) { height: 30px; }
+.transition-brand { display: flex; align-items: center; }
+.transition-logo { width: min(270px, 100%); }
 .transition-side p { margin: 20px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
 @keyframes transition-in { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 20; padding: 13px 16px; color: #e8ffad; background: #1d2216; border: 1px solid #5b7131; border-radius: 12px; box-shadow: 0 15px 40px #0008; }
