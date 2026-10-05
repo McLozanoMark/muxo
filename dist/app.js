@@ -666,12 +666,15 @@ function closeRoomShare() {
   shareModalKeydownHandler = null;
   document.querySelector('#room-share-modal')?.remove();
 }
+function roomCodeForm() {
+  return `<div class="room-access-divider" aria-hidden="true"><span>o escribe el código</span></div><form id="join-room-form" class="room-join-form"><label for="room-code-input">Código de sala</label><div class="room-join-controls"><input id="room-code-input" class="input" maxlength="${ROOM_ID_LENGTH}" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="Ej. D7B3HL" aria-describedby="room-code-hint"/><button class="button" type="submit">${icon('login')}Entrar</button></div><small id="room-code-hint">Usa las ${ROOM_ID_LENGTH} letras o números que aparecen en el enlace de la sala.</small></form>`;
+}
 function roomAccessView() {
   const role = currentRole();
   const lockMessage = operatorLockError && role === 'operator' ? `<div class="error room-lock-error" role="alert">${escapeHtml(operatorLockError)} Puedes crear una sala nueva.</div>` : '';
   const action = role === 'operator'
-    ? `<button id="create-room-button" class="button room-create">${icon('add_circle')}Crear sala automáticamente</button><small class="room-hint">Muxo generará un código único y te dará enlaces QR para compartir.</small>`
-    : `<div class="room-connect-hint"><span class="room-connect-icon">${icon('qr_code_scanner')}</span><strong>Escanea el QR de la sala</strong><small>El encargado comparte un enlace para entrar sin escribir códigos.</small></div>`;
+    ? `<button id="create-room-button" class="button room-create">${icon('add_circle')}Crear sala automáticamente</button><small class="room-hint">Muxo generará un código único y te dará enlaces QR para compartir.</small>${roomCodeForm()}`
+    : `<div class="room-connect-hint"><span class="room-connect-icon">${icon('qr_code_scanner')}</span><strong>Escanea el QR de la sala</strong><small>Si la cámara no está disponible, también puedes escribir el código.</small></div>${roomCodeForm()}`;
   return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>Conecta tu sala</h1><p>Una sala mantiene separadas las canciones, mesas y controles de cada karaoke.</p><div class="room-role-switch"><a class="${role === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}Encargado</a><a class="${role === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}Mesero</a><a class="${role === 'display' ? 'active' : ''}" href="#display">${icon('tv')}Pantalla</a></div>${lockMessage}${action}</div></div>`;
 }
 function waiterView() {
@@ -959,6 +962,23 @@ function updateWaiterInPlace() {
 }
 function bindRoomAccess() {
   document.querySelector('#create-room-button')?.addEventListener('click', createRoom);
+  const form = document.querySelector('#join-room-form');
+  const input = document.querySelector('#room-code-input');
+  input?.addEventListener('input', () => {
+    input.value = normalizeRoomId(input.value);
+    input.setCustomValidity('');
+  });
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const roomId = normalizeRoomId(input?.value);
+    if (roomId.length !== ROOM_ID_LENGTH) {
+      input?.setCustomValidity(`Escribe un código de ${ROOM_ID_LENGTH} caracteres.`);
+      input?.reportValidity();
+      return;
+    }
+    operatorLockError = '';
+    location.hash = `#${currentRole()}?room=${roomId}`;
+  });
 }
 function render() {
   const currentRoute = route();
