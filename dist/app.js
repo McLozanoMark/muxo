@@ -40,6 +40,7 @@ let selectionKeydownHandler = null;
 let operatorLeaseTimer = null;
 let operatorLockError = '';
 const localKey = 'muxo-pages-session';
+const deviceModeKey = 'muxo-device-mode';
 
 function escapeHtml(value) {
   const normalized = String(value ?? '')
@@ -72,6 +73,23 @@ function roomHref(role) { return `#${role}${activeRoomId ? `?room=${encodeURICom
 function localSessionKey(roomId = activeRoomId) { return `${localKey}-${roomId || 'local'}`; }
 function normalizeRoomId(value) { return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_ID_LENGTH); }
 function generateRoomId() { return Array.from({ length: ROOM_ID_LENGTH }, () => ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]).join(''); }
+function deviceMode() { return localStorage.getItem(deviceModeKey); }
+function canAccessOperator() { return !['waiter', 'display'].includes(deviceMode()); }
+function rememberDeviceMode(role) {
+  if (role === 'operator' || !deviceMode()) localStorage.setItem(deviceModeKey, role);
+}
+function roleSwitchMarkup(activeRole) {
+  const operatorLink = canAccessOperator() ? `<a class="${activeRole === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}Encargado</a>` : '';
+  return `<div class="room-role-switch">${operatorLink}<a class="${activeRole === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}Mesero</a><a class="${activeRole === 'display' ? 'active' : ''}" href="#display">${icon('tv')}Pantalla</a></div>`;
+}
+function redirectUnauthorizedOperator() {
+  if (route() !== 'operator' || canAccessOperator()) return false;
+  const roomId = roomIdFromLocation();
+  const target = roomId ? `#waiter?room=${encodeURIComponent(roomId)}` : '#waiter';
+  notify('Este dispositivo está configurado como mesero y no puede abrir el modo encargado.');
+  if (location.hash !== target) location.hash = target;
+  return true;
+}
 function clientDeviceId() {
   const stored = localStorage.getItem('muxo-client-id');
   if (stored) return stored;
@@ -531,6 +549,7 @@ async function startRoomSession(roomId) {
   }
   try {
     await initializeFirebaseServices();
+    const sessionRole = currentRole();
     const sessionRef = roomDocument();
     const snapshot = await getDoc(sessionRef);
     const roomState = snapshot.data()?.rooms?.[roomId];
@@ -540,7 +559,7 @@ async function startRoomSession(roomId) {
       render();
       return;
     }
-    if (currentRole() === 'operator') {
+    if (sessionRole === 'operator') {
       try {
         await claimOperatorLock(roomId);
       } catch (error) {
@@ -552,6 +571,7 @@ async function startRoomSession(roomId) {
       }
     }
     operatorLockError = '';
+    rememberDeviceMode(sessionRole);
     activeRoomId = roomId;
     firebaseReady = true;
     state = roomState;
@@ -632,7 +652,8 @@ function save(next) {
 }
 function nav(active, display = false) {
   if (display) return `<header class="display-top"><a class="brand" href="${roomHref('display')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>${icon('mic_external_on')} SALA ${escapeHtml(activeRoomId ?? '')} · EN VIVO</span><span class="muted">${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</span></header>`;
-  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'}</span><div class="top-actions"><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a><a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a></nav>`;
+  const operatorLink = canAccessOperator() ? `<a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a>` : '';
+  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'}</span><div class="top-actions"><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a>${operatorLink}</nav>`;
 }
 function roomCodeForm() {
   return `<div class="room-access-divider" aria-hidden="true"><span>o escribe el código</span></div><form id="join-room-form" class="room-join-form"><label for="room-code-input">Código de sala</label><div class="room-join-controls"><input id="room-code-input" class="input" maxlength="${ROOM_ID_LENGTH}" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="Ej. D7B3HL" aria-describedby="room-code-hint"/><button class="button" type="submit">${icon('login')}Entrar</button></div><small id="room-code-hint">Usa las ${ROOM_ID_LENGTH} letras o números que aparecen en el enlace de la sala.</small></form>`;
@@ -647,7 +668,7 @@ function roomAccessView() {
   const action = role === 'operator'
     ? `<button id="create-room-button" class="button room-create">${icon('add_circle')}Crear sala automáticamente</button><small class="room-hint">Muxo generará un código único para compartirlo con tu equipo.</small>${roomCodeForm()}`
     : roomCodeForm();
-  return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="room-pairing-layout"><div class="room-pairing-mark"><span class="room-pairing-ring"></span>${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')}</div><div class="room-pairing-copy"><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>${title}</h1><p>${description}</p></div></div><div class="room-role-switch"><a class="${role === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}Encargado</a><a class="${role === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}Mesero</a><a class="${role === 'display' ? 'active' : ''}" href="#display">${icon('tv')}Pantalla</a></div>${lockMessage}${action}</div></div>`;
+  return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="room-pairing-layout"><div class="room-pairing-mark"><span class="room-pairing-ring"></span>${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')}</div><div class="room-pairing-copy"><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>${title}</h1><p>${description}</p></div></div>${roleSwitchMarkup(role)}${lockMessage}${action}</div></div>`;
 }
 function waiterView() {
   return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><label class="sr-only" for="search-input">Artista o canción</label><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error" role="status" aria-live="polite"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
@@ -1005,6 +1026,7 @@ function render() {
   }
 }
 async function handleRouteChange() {
+  if (redirectUnauthorizedOperator()) return;
   const nextRoomId = roomIdFromLocation();
   if (nextRoomId !== activeRoomId) {
     const previousRoomId = activeRoomId;
@@ -1016,5 +1038,7 @@ async function handleRouteChange() {
   render();
 }
 window.addEventListener('hashchange', handleRouteChange);
+activeRoomId = roomIdFromLocation();
+redirectUnauthorizedOperator();
 activeRoomId = roomIdFromLocation();
 startRoomSession(activeRoomId);
