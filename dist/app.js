@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-import { getFirestore, doc, getDoc, onSnapshot, setDoc, updateDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
+import { getFirestore, doc, getDoc, onSnapshot, updateDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
 const YOUTUBE_API_KEY = 'AIzaSyDs31A8sNQqSVESILNKv93qWLxEAq-33E4';
 const FIREBASE_CONFIG = { apiKey: 'AIzaSyBwySV_jaJoQcow6u494XH7WkFmMY3eyG0', authDomain: 'muxo-karaoke.firebaseapp.com', projectId: 'muxo-karaoke', storageBucket: 'muxo-karaoke.firebasestorage.app', messagingSenderId: '290765040154', appId: '1:290765040154:web:eb204766dcdc3c58437fa3' };
@@ -8,12 +8,9 @@ const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/funkym
 const COMMERCIAL_AUDIO_URL = './muxo-commercial.m4a';
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_ID_LENGTH = 6;
-const demoQueue = [
-  { id: 'demo-1', tableNumber: '7', singerName: 'Diego', songTitle: 'Bohemian Rhapsody — Queen (Karaoke)', youtubeVideoId: 'fJ9rUzIMcZQ', thumbnail: 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', channelTitle: 'Karaoke Version', status: 'queued', createdAt: Date.now() - 180000 },
-  { id: 'demo-2', tableNumber: '3', singerName: 'Andrea', songTitle: 'Smells Like Teen Spirit — Nirvana (Karaoke)', youtubeVideoId: 'hTWKbfoikeg', thumbnail: 'https://i.ytimg.com/vi/hTWKbfoikeg/hqdefault.jpg', channelTitle: 'Sing King Karaoke', status: 'queued', createdAt: Date.now() - 120000 },
-  { id: 'demo-3', tableNumber: '18', singerName: 'Luis', songTitle: 'Uptown Funk — Mark Ronson ft. Bruno Mars (Karaoke)', youtubeVideoId: 'OPf0YbXqDm0', thumbnail: 'https://i.ytimg.com/vi/OPf0YbXqDm0/hqdefault.jpg', channelTitle: 'Karaoke Hits', status: 'queued', createdAt: Date.now() - 60000 },
-];
-const freshSession = () => ({ nowPlaying: null, queue: structuredClone(demoQueue), recent: [] });
+const OPERATOR_LEASE_MS = 45000;
+const OPERATOR_HEARTBEAT_MS = 10000;
+const freshSession = () => emptyRoomSession();
 const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
 const app = document.querySelector('#app');
 let state = freshSession();
@@ -39,6 +36,10 @@ let displayVideoError = false;
 let transitionAmbientAudio = null;
 let commercialAudio = null;
 let commercialPlaybackId = 0;
+let selectionKeydownHandler = null;
+let shareModalKeydownHandler = null;
+let operatorLeaseTimer = null;
+let operatorLockError = '';
 const localKey = 'muxo-pages-session';
 
 function escapeHtml(value) {
@@ -72,6 +73,13 @@ function roomHref(role) { return `#${role}${activeRoomId ? `?room=${encodeURICom
 function localSessionKey(roomId = activeRoomId) { return `${localKey}-${roomId || 'local'}`; }
 function normalizeRoomId(value) { return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_ID_LENGTH); }
 function generateRoomId() { return Array.from({ length: ROOM_ID_LENGTH }, () => ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]).join(''); }
+function clientDeviceId() {
+  const stored = localStorage.getItem('muxo-client-id');
+  if (stored) return stored;
+  const value = id();
+  localStorage.setItem('muxo-client-id', value);
+  return value;
+}
 function currentRole() { return ['waiter', 'operator', 'display'].includes(route()) ? route() : 'waiter'; }
 function roleLabel(role = currentRole()) { return role === 'operator' ? 'encargado' : role === 'display' ? 'pantalla TV' : 'mesero'; }
 function id() { return crypto.randomUUID?.() || `muxo-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
@@ -83,6 +91,23 @@ function playbackLabel() { return playbackState().command?.action === 'pause' ? 
 function formatTime(seconds) { const safe = Math.max(0, Math.floor(Number(seconds) || 0)); return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, '0')}`; }
 function roomDocument() { return doc(firebaseDb, 'sessions', 'muxo-main'); }
 function sessionDocument() { return roomDocument(); }
+function roomJoinUrl(role) { return `${location.origin}${location.pathname}#${role}?room=${encodeURIComponent(activeRoomId ?? '')}`; }
+function roomQrUrl(url) { return `https://quickchart.io/qr?text=${encodeURIComponent(url)}&size=240&margin=2&dark=0b090e&light=ffffff`; }
+function youtubeApiError(response, payload = null) {
+  const reason = payload?.error?.errors?.[0]?.reason;
+  const message = String(payload?.error?.message ?? '').toLowerCase();
+  if (reason === 'quotaExceeded') return new Error('La cuota diaria de YouTube se agotó. Intenta nuevamente mañana o revisa la cuota del proyecto.');
+  if (reason === 'keyInvalid') return new Error('La clave de YouTube no es válida. Revisa la configuración de YouTube Data API.');
+  if (reason === 'forbidden' && message.includes('referer')) return new Error('YouTube bloqueó este dominio. Agrega el dominio local o publicado a las restricciones HTTP de la clave.');
+  if (response?.status === 403) return new Error('YouTube rechazó la solicitud. Revisa la clave, sus restricciones HTTP y la cuota del proyecto.');
+  return new Error('YouTube no respondió correctamente. Intenta nuevamente en unos segundos.');
+}
+async function youtubeRequest(endpoint, params) {
+  const response = await fetch(`https://www.googleapis.com/youtube/v3/${endpoint}?${new URLSearchParams(params)}`);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw youtubeApiError(response, payload);
+  return payload;
+}
 function loadYoutubeApi() {
   if (window.YT?.Player) return Promise.resolve();
   if (youtubeApiPromise) return youtubeApiPromise;
@@ -420,9 +445,87 @@ async function initializeFirebaseServices() {
     firebaseDb = getFirestore(initializeApp(FIREBASE_CONFIG));
   }
 }
+async function claimOperatorLock(roomId) {
+  const roomRef = roomDocument();
+  const deviceId = clientDeviceId();
+  await runTransaction(firebaseDb, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    const roomState = snapshot.data()?.rooms?.[roomId];
+    if (!roomState) throw new Error('ROOM_NOT_FOUND');
+    const lastSeen = Number(roomState.operatorLastSeenAt) || 0;
+    const occupied = roomState.operatorId && roomState.operatorId !== deviceId && Date.now() - lastSeen < OPERATOR_LEASE_MS;
+    if (occupied) {
+      const error = new Error('OPERATOR_ALREADY_ACTIVE');
+      error.code = 'OPERATOR_ALREADY_ACTIVE';
+      throw error;
+    }
+    transaction.update(roomRef, {
+      [`rooms.${roomId}.operatorId`]: deviceId,
+      [`rooms.${roomId}.operatorLastSeenAt`]: Date.now(),
+      [`rooms.${roomId}.updatedAt`]: Date.now(),
+    });
+  });
+}
+function stopOperatorLease() {
+  clearInterval(operatorLeaseTimer);
+  operatorLeaseTimer = null;
+}
+async function releaseOperatorLock(roomId = activeRoomId) {
+  stopOperatorLease();
+  if (!firebaseReady || !roomId) return;
+  try {
+    await runTransaction(firebaseDb, async (transaction) => {
+      const roomRef = roomDocument();
+      const snapshot = await transaction.get(roomRef);
+      const roomState = snapshot.data()?.rooms?.[roomId];
+      if (!roomState || roomState.operatorId !== clientDeviceId()) return;
+      transaction.update(roomRef, {
+        [`rooms.${roomId}.operatorId`]: null,
+        [`rooms.${roomId}.operatorLastSeenAt`]: 0,
+        [`rooms.${roomId}.updatedAt`]: Date.now(),
+      });
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+function loseOperatorLock() {
+  operatorLockError = 'Esta sala ya tiene otro encargado activo.';
+  stopOperatorLease();
+  sessionUnsubscribe?.();
+  sessionUnsubscribe = null;
+  activeRoomId = null;
+  firebaseReady = false;
+  state = emptyRoomSession();
+  render();
+}
+function startOperatorLease() {
+  stopOperatorLease();
+  const renew = async () => {
+    if (!firebaseReady || !activeRoomId || currentRole() !== 'operator') return;
+    try {
+      await runTransaction(firebaseDb, async (transaction) => {
+        const roomRef = roomDocument();
+        const snapshot = await transaction.get(roomRef);
+        const roomState = snapshot.data()?.rooms?.[activeRoomId];
+        if (!roomState || roomState.operatorId !== clientDeviceId()) {
+          const error = new Error('OPERATOR_LOCK_LOST');
+          error.code = 'OPERATOR_LOCK_LOST';
+          throw error;
+        }
+        transaction.update(roomRef, { [`rooms.${activeRoomId}.operatorLastSeenAt`]: Date.now() });
+      });
+    } catch (error) {
+      console.error(error);
+      loseOperatorLock();
+    }
+  };
+  operatorLeaseTimer = setInterval(renew, OPERATOR_HEARTBEAT_MS);
+}
 async function startRoomSession(roomId) {
   sessionUnsubscribe?.();
   sessionUnsubscribe = null;
+  stopOperatorLease();
   firebaseReady = false;
   state = emptyRoomSession();
   if (!roomId) {
@@ -440,6 +543,18 @@ async function startRoomSession(roomId) {
       render();
       return;
     }
+    if (currentRole() === 'operator') {
+      try {
+        await claimOperatorLock(roomId);
+      } catch (error) {
+        console.error(error);
+        activeRoomId = null;
+        operatorLockError = error.code === 'OPERATOR_ALREADY_ACTIVE' ? 'Esta sala ya tiene otro encargado activo.' : 'No se pudo reservar el control de esta sala.';
+        render();
+        return;
+      }
+    }
+    operatorLockError = '';
     activeRoomId = roomId;
     firebaseReady = true;
     state = roomState;
@@ -462,6 +577,7 @@ async function startRoomSession(roomId) {
     notify('No se pudo conectar a Firebase. La sala quedó en modo local.');
   }
   render();
+  if (currentRole() === 'operator' && firebaseReady) startOperatorLease();
 }
 async function createRoom() {
   try {
@@ -469,12 +585,19 @@ async function createRoom() {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const roomId = generateRoomId();
       const roomRef = roomDocument();
-      const existing = await getDoc(roomRef);
-      const rooms = existing.data()?.rooms ?? {};
-      if (rooms[roomId]) continue;
-      const roomState = { roomId, createdAt: Date.now(), updatedAt: Date.now(), ...emptyRoomSession() };
-      if (existing.exists()) await updateDoc(roomRef, { [`rooms.${roomId}`]: roomState });
-      else await setDoc(roomRef, { rooms: { [roomId]: roomState } });
+      let created = false;
+      await runTransaction(firebaseDb, async (transaction) => {
+        const existing = await transaction.get(roomRef);
+        const rooms = existing.data()?.rooms ?? {};
+        if (rooms[roomId]) return;
+        const now = Date.now();
+        const roomState = { roomId, createdAt: now, updatedAt: now, operatorId: clientDeviceId(), operatorLastSeenAt: now, ...emptyRoomSession() };
+        if (existing.exists()) transaction.update(roomRef, { [`rooms.${roomId}`]: roomState });
+        else transaction.set(roomRef, { rooms: { [roomId]: roomState } });
+        created = true;
+      });
+      if (!created) continue;
+      operatorLockError = '';
       location.hash = `#operator?room=${roomId}`;
       return;
     }
@@ -484,24 +607,14 @@ async function createRoom() {
     notify('No se pudo crear la sala. Revisa la conexión de Firebase.');
   }
 }
-async function joinRoom(value) {
-  const roomId = normalizeRoomId(value);
-  if (roomId.length !== ROOM_ID_LENGTH) return notify(`Escribe un código de ${ROOM_ID_LENGTH} caracteres.`);
-  try {
-    await initializeFirebaseServices();
-    const snapshot = await getDoc(roomDocument());
-    if (!snapshot.data()?.rooms?.[roomId]) return notify('No encontramos esa sala. Verifica el código.');
-    location.hash = `#${currentRole()}?room=${roomId}`;
-  } catch (error) {
-    console.error(error);
-    notify('No se pudo validar la sala. Revisa la conexión de Firebase.');
-  }
-}
 function leaveRoom() {
+  void releaseOperatorLock();
   sessionUnsubscribe?.();
   sessionUnsubscribe = null;
+  stopOperatorLease();
   activeRoomId = null;
   firebaseReady = false;
+  operatorLockError = '';
   state = freshSession();
   location.hash = `#${currentRole()}`;
 }
@@ -511,19 +624,58 @@ function save(next) {
   render();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    if (firebaseReady && activeRoomId) await updateDoc(sessionDocument(), { [`rooms.${activeRoomId}`]: { ...state, updatedAt: Date.now() } });
+    if (!firebaseReady || !activeRoomId) return;
+    try {
+      await updateDoc(sessionDocument(), { [`rooms.${activeRoomId}`]: { ...state, updatedAt: Date.now() } });
+    } catch (error) {
+      console.error(error);
+      notify('No se pudo sincronizar el cambio con Firebase.');
+    }
   }, 120);
 }
 function nav(active, display = false) {
   if (display) return `<header class="display-top"><a class="brand" href="${roomHref('display')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>${icon('mic_external_on')} SALA ${escapeHtml(activeRoomId ?? '')} · EN VIVO</span><span class="muted">${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</span></header>`;
-  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'}</span><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a><a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a><a class="${active === 'display' ? 'active' : ''}" href="${roomHref('display')}">${icon('tv')}<span>Pantalla TV</span></a></nav>`;
+  const shareAction = active === 'operator' ? `<button id="share-room-button" class="room-switch" type="button">${icon('share')}<span>Compartir sala</span></button>` : '';
+  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'}</span><div class="top-actions">${shareAction}<a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a><a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a><a class="${active === 'display' ? 'active' : ''}" href="${roomHref('display')}">${icon('tv')}<span>Pantalla TV</span></a></nav>`;
+}
+function roomShareView() {
+  const waiterUrl = roomJoinUrl('waiter');
+  const displayUrl = roomJoinUrl('display');
+  return `<div class="modal-backdrop" id="room-share-modal" role="dialog" aria-modal="true" aria-labelledby="room-share-title"><section class="room-share-modal card"><button id="close-room-share" class="icon-button modal-close" aria-label="Cerrar compartir sala">${icon('close')}</button><div class="eyebrow">SALA ${escapeHtml(activeRoomId ?? '')}</div><h2 id="room-share-title">Invita a tu equipo</h2><p>Escanea un QR para entrar sin escribir códigos. El encargado queda bloqueado para los demás dispositivos.</p><div class="room-share-grid"><article class="room-share-item"><img src="${escapeHtml(roomQrUrl(waiterUrl))}" alt="Código QR para abrir Muxo en modo mesero"/><strong>Mesero</strong><button class="button secondary copy-room-link" data-link="${escapeHtml(waiterUrl)}" type="button">${icon('content_copy')}Copiar enlace</button></article><article class="room-share-item"><img src="${escapeHtml(roomQrUrl(displayUrl))}" alt="Código QR para abrir Muxo en la pantalla TV"/><strong>Pantalla TV</strong><button class="button secondary copy-room-link" data-link="${escapeHtml(displayUrl)}" type="button">${icon('content_copy')}Copiar enlace</button></article></div></section></div>`;
+}
+function openRoomShare() {
+  if (!activeRoomId) return;
+  document.body.insertAdjacentHTML('beforeend', roomShareView());
+  shareModalKeydownHandler = (event) => { if (event.key === 'Escape') closeRoomShare(); };
+  document.addEventListener('keydown', shareModalKeydownHandler);
+  document.querySelector('#close-room-share')?.addEventListener('click', closeRoomShare);
+  document.querySelector('#room-share-modal')?.addEventListener('click', (event) => { if (event.target.id === 'room-share-modal') closeRoomShare(); });
+  document.querySelectorAll('.copy-room-link').forEach((button) => button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(button.dataset.link);
+      notify('Enlace copiado.');
+    } catch (error) {
+      console.error(error);
+      notify('No se pudo copiar el enlace.');
+    }
+  }));
+  requestAnimationFrame(() => document.querySelector('#close-room-share')?.focus());
+}
+function closeRoomShare() {
+  document.removeEventListener('keydown', shareModalKeydownHandler);
+  shareModalKeydownHandler = null;
+  document.querySelector('#room-share-modal')?.remove();
 }
 function roomAccessView() {
   const role = currentRole();
-  return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>Conecta tu sala</h1><p>Usa un código de sala para mantener tu cola separada de los demás karaokes.</p><div class="room-role-switch"><a class="${role === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}Encargado</a><a class="${role === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}Mesero</a><a class="${role === 'display' ? 'active' : ''}" href="#display">${icon('tv')}Pantalla</a></div>${role === 'operator' ? `<button id="create-room-button" class="button room-create">${icon('add_circle')}Crear nueva sala</button><div class="room-divider"><span>o entra con un código</span></div>` : '<div class="room-divider"><span>Ingresa el código de tu sala</span></div>'}<form id="room-join-form" class="room-join-form"><input id="room-code-input" class="input" inputmode="text" maxlength="${ROOM_ID_LENGTH}" autocomplete="off" placeholder="Ej. M7K4Q2" aria-label="Código de sala"/><button class="button secondary" type="submit">${icon('login')}Entrar</button></form><small class="room-hint">La sala sincroniza tus dispositivos aunque estén en redes Wi‑Fi diferentes.</small></div></div>`;
+  const lockMessage = operatorLockError && role === 'operator' ? `<div class="error room-lock-error" role="alert">${escapeHtml(operatorLockError)} Puedes crear una sala nueva.</div>` : '';
+  const action = role === 'operator'
+    ? `<button id="create-room-button" class="button room-create">${icon('add_circle')}Crear sala automáticamente</button><small class="room-hint">Muxo generará un código único y te dará enlaces QR para compartir.</small>`
+    : `<div class="room-connect-hint"><span class="room-connect-icon">${icon('qr_code_scanner')}</span><strong>Escanea el QR de la sala</strong><small>El encargado comparte un enlace para entrar sin escribir códigos.</small></div>`;
+  return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>Conecta tu sala</h1><p>Una sala mantiene separadas las canciones, mesas y controles de cada karaoke.</p><div class="room-role-switch"><a class="${role === 'operator' ? 'active' : ''}" href="#operator">${icon('queue_music')}Encargado</a><a class="${role === 'waiter' ? 'active' : ''}" href="#waiter">${icon('person')}Mesero</a><a class="${role === 'display' ? 'active' : ''}" href="#display">${icon('tv')}Pantalla</a></div>${lockMessage}${action}</div></div>`;
 }
 function waiterView() {
-  return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
+  return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><label class="sr-only" for="search-input">Artista o canción</label><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error" role="status" aria-live="polite"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
 }
 function renderResults(results) {
   const node = document.querySelector('#results');
@@ -571,8 +723,7 @@ function openSongModal(song) {
   selectedTableNumber = '';
   selectedSingerName = '';
   renderSelection();
-  fetch(`https://www.googleapis.com/youtube/v3/videos?${new URLSearchParams({ part: 'contentDetails,snippet', id: song.id, key: YOUTUBE_API_KEY })}`)
-    .then((response) => response.ok ? response.json() : Promise.reject(new Error('No se pudo consultar la duración.')))
+  youtubeRequest('videos', { part: 'contentDetails,snippet', id: song.id, key: YOUTUBE_API_KEY })
     .then((data) => {
       const details = data.items?.[0];
       if (!details || selectedSong?.id !== song.id) return;
@@ -588,8 +739,17 @@ function openSongModal(song) {
 function renderSelection() {
   const node = document.querySelector('#selection');
   if (!node) return;
+  document.removeEventListener('keydown', selectionKeydownHandler);
+  selectionKeydownHandler = null;
   if (!selectedSong) { node.innerHTML = ''; return; }
   node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div></div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div><input id="custom-table-input" class="input" type="number" min="101" step="1" inputmode="numeric" placeholder="Otra mesa, si supera la 100" value="${selectedTableNumber && Number(selectedTableNumber) > 100 ? escapeHtml(selectedTableNumber) : ''}"/></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${selectedTableNumber ? '' : 'disabled'}>${icon('playlist_add')}Agregar a la cola</button></div></div></section></div>`;
+  selectionKeydownHandler = (event) => {
+    if (event.key !== 'Escape') return;
+    selectedSong = null;
+    renderSelection();
+  };
+  document.addEventListener('keydown', selectionKeydownHandler);
+  requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #custom-table-input, #song-modal #close-song-modal')?.focus());
   node.querySelector('#close-song-modal')?.addEventListener('click', () => { selectedSong = null; renderSelection(); });
   node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') { selectedSong = null; renderSelection(); } });
   node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; node.querySelector('#custom-table-input').value = ''; syncSelectionModal(); }));
@@ -617,13 +777,11 @@ async function searchYoutube({ pageToken = '', pageNumber = 1 } = {}) {
   try {
     const params = new URLSearchParams({ part:'snippet', type:'video', maxResults:String(searchState.pageSize), videoEmbeddable:'true', videoSyndicated:'true', q:`${query} karaoke`, key:YOUTUBE_API_KEY });
     if (pageToken) params.set('pageToken', pageToken);
-    const response = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`);
-    if (!response.ok) throw new Error('YouTube no respondió correctamente.');
-    const data = await response.json();
+    const data = await youtubeRequest('search', params);
     const results = prioritizeSearchResults((data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, description:item.snippet.description, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url, isPriority: normalizeChannelName(item.snippet.channelTitle).includes(normalizeChannelName(PRIORITY_CHANNEL_NAME)) })));
     searchState = { ...searchState, nextPageToken: data.nextPageToken || null, prevPageToken: data.prevPageToken || null, totalResults: data.pageInfo?.totalResults || 0, results };
     renderResults(results);
-  } catch (err) { error.innerHTML = `<div class="error">${escapeHtml(err.message)} Revisa la configuración de YouTube.</div>`; }
+  } catch (err) { error.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`; }
   finally { button.disabled = false; button.textContent = 'Buscar'; }
 }
 function operatorView() {
@@ -746,6 +904,7 @@ async function advanceQueue(expectedVideoId = null) {
   save({ ...state, nowPlaying: next ? { ...next, status: 'playing' } : null, queue: rest, recent: state.nowPlaying ? [{ ...state.nowPlaying, status: 'finished' }, ...state.recent].slice(0, 8) : state.recent, playback: { ...playbackState(), position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: playbackVolume(), createdAt: Date.now() } } });
 }
 function bindOperator() {
+  document.querySelector('#share-room-button')?.addEventListener('click', openRoomShare);
   document.querySelector('#next-button')?.addEventListener('click', () => advanceQueue(state.nowPlaying?.youtubeVideoId ?? null));
   document.querySelector('#absent-button')?.addEventListener('click', () => { if (!state.nowPlaying) return; save({ ...state, nowPlaying:null, queue:[...state.queue,{...state.nowPlaying,status:'absent'}] }); });
   document.querySelector('#pause-button')?.addEventListener('click', () => sendPlaybackCommand('pause'));
@@ -800,13 +959,6 @@ function updateWaiterInPlace() {
 }
 function bindRoomAccess() {
   document.querySelector('#create-room-button')?.addEventListener('click', createRoom);
-  document.querySelector('#room-join-form')?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    joinRoom(document.querySelector('#room-code-input')?.value);
-  });
-  document.querySelector('#room-code-input')?.addEventListener('input', (event) => {
-    event.target.value = normalizeRoomId(event.target.value);
-  });
 }
 function render() {
   const currentRoute = route();
@@ -864,6 +1016,8 @@ function render() {
 async function handleRouteChange() {
   const nextRoomId = roomIdFromLocation();
   if (nextRoomId !== activeRoomId) {
+    const previousRoomId = activeRoomId;
+    if (previousRoomId) await releaseOperatorLock(previousRoomId);
     activeRoomId = nextRoomId;
     await startRoomSession(nextRoomId);
     return;
