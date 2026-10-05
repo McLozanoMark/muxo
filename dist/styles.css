@@ -87,8 +87,8 @@ a { color: inherit; text-decoration: none; }
 .priority-channel .material-symbols-rounded { font-size: 14px; }
 .song .button { min-height: 38px; padding: 8px 11px; font-size: 12px; }
 .empty { padding: 42px; color: var(--muted); text-align: center; border: 1px dashed #494052; border-radius: var(--radius); }
-.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: #050307d9; backdrop-filter: blur(12px); }
-.song-modal { position: relative; width: min(1000px, 96vw); max-height: 92vh; overflow: auto; padding: 28px; background: radial-gradient(circle at 100% 0, #32183d 0, transparent 28rem), linear-gradient(145deg, #19151f, #100d14); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 20px; background: #050307d9; backdrop-filter: blur(12px); }
+.song-modal { position: relative; width: min(1000px, 96vw); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); margin: auto; overflow: auto; padding: 28px; background: radial-gradient(circle at 100% 0, #32183d 0, transparent 28rem), linear-gradient(145deg, #19151f, #100d14); }
 .modal-close { position: absolute; top: 18px; right: 18px; z-index: 1; }
 .song-modal-head { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 20px; align-items: center; padding-right: 48px; }
 .song-modal-head img { width: 140px; height: 96px; object-fit: cover; border-radius: 12px; box-shadow: 0 16px 34px #0008; }
@@ -98,11 +98,10 @@ a { color: inherit; text-decoration: none; }
 .modal-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .modal-section-head h3, .singer-picker h3 { margin: 7px 0 0; font-size: 22px; letter-spacing: -.04em; }
 .table-status { padding: 7px 10px; color: var(--lime); background: #c9f52b12; border: 1px solid #566624; border-radius: 8px; font: 12px 'DM Mono', monospace; white-space: nowrap; }
-.table-grid { display: grid; grid-template-columns: repeat(10, minmax(32px, 1fr)); gap: 7px; max-height: 330px; padding: 4px; overflow: auto; }
+.table-grid { display: grid; grid-template-columns: repeat(10, minmax(32px, 1fr)); gap: 7px; padding: 4px; }
 .table-choice { min-height: 36px; padding: 5px 3px; color: #cfc5d3; background: #100c15; border: 1px solid #3c3042; border-radius: 8px; font: 12px 'DM Mono', monospace; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
 .table-choice:hover { color: var(--text); border-color: #7a8f34; transform: translateY(-1px); }
 .table-choice.selected { color: #11140b; background: var(--lime); border-color: var(--lime); box-shadow: 0 0 18px #c9f52b66; }
-.table-picker > .input { width: 100%; margin-top: 14px; }
 .singer-picker { display: flex; flex-direction: column; align-items: stretch; padding: 20px; background: #0e0a13aa; border: 1px solid var(--line-soft); border-radius: 14px; }
 .singer-picker .input { width: 100%; margin-top: 18px; }
 .song-description { min-height: 96px; margin: 18px 0 22px; overflow: auto; color: var(--muted); font-size: 13px; line-height: 1.55; }
@@ -312,7 +311,8 @@ a { color: inherit; text-decoration: none; }
   .waiter-search { display: block; padding: 8px; }
   .waiter-search .button { width: 100%; margin-top: 6px; }
   .waiter-summary, .results-toolbar { align-items: flex-start; flex-direction: column; }
-  .song-modal { padding: 20px 16px; }
+  .modal-backdrop { align-items: center; padding: 12px; }
+  .song-modal { width: 100%; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); padding: 20px 16px; }
   .song-modal-head { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding-right: 36px; }
   .song-modal-head img { width: 82px; height: 62px; }
   .table-grid { grid-template-columns: repeat(5, minmax(32px, 1fr)); }

@@ -8,6 +8,7 @@ const TRANSITION_AUDIO_URL = 'https://opengameart.org/sites/default/files/funkym
 const COMMERCIAL_AUDIO_URL = './muxo-commercial.m4a';
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_ID_LENGTH = 6;
+const MAX_TABLES = 20;
 const OPERATOR_LEASE_MS = 45000;
 const OPERATOR_HEARTBEAT_MS = 10000;
 const freshSession = () => emptyRoomSession();
@@ -699,10 +700,10 @@ function formatIsoDuration(value) {
 }
 function formatSelectedTable(value) {
   const numeric = Number(value);
-  return Number.isInteger(numeric) && numeric >= 1 && numeric <= 100 ? String(numeric).padStart(2, '0') : String(value || '');
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= MAX_TABLES ? String(numeric).padStart(2, '0') : String(value || '');
 }
 function tableOptionsMarkup() {
-  return Array.from({ length: 100 }, (_, index) => {
+  return Array.from({ length: MAX_TABLES }, (_, index) => {
     const tableNumber = String(index + 1).padStart(2, '0');
     return `<button type="button" class="table-choice ${selectedTableNumber === String(index + 1) ? 'selected' : ''}" data-table="${index + 1}">${tableNumber}</button>`;
   }).join('');
@@ -738,24 +739,23 @@ function renderSelection() {
   document.removeEventListener('keydown', selectionKeydownHandler);
   selectionKeydownHandler = null;
   if (!selectedSong) { node.innerHTML = ''; return; }
-  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div></div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div><input id="custom-table-input" class="input" type="number" min="101" step="1" inputmode="numeric" placeholder="Otra mesa, si supera la 100" value="${selectedTableNumber && Number(selectedTableNumber) > 100 ? escapeHtml(selectedTableNumber) : ''}"/></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${selectedTableNumber ? '' : 'disabled'}>${icon('playlist_add')}Agregar a la cola</button></div></div></section></div>`;
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div></div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${selectedTableNumber ? '' : 'disabled'}>${icon('playlist_add')}Agregar a la cola</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
     selectedSong = null;
     renderSelection();
   };
   document.addEventListener('keydown', selectionKeydownHandler);
-  requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #custom-table-input, #song-modal #close-song-modal')?.focus());
+  requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #close-song-modal')?.focus());
   node.querySelector('#close-song-modal')?.addEventListener('click', () => { selectedSong = null; renderSelection(); });
   node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') { selectedSong = null; renderSelection(); } });
-  node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; node.querySelector('#custom-table-input').value = ''; syncSelectionModal(); }));
-  node.querySelector('#custom-table-input')?.addEventListener('input', (event) => { selectedTableNumber = event.target.value.trim(); node.querySelectorAll('.table-choice').forEach((button) => button.classList.remove('selected')); syncSelectionModal(); });
+  node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; syncSelectionModal(); }));
   node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
   node.querySelector('#add-button')?.addEventListener('click', () => {
     const tableNumber = selectedTableNumber.trim();
     if (!tableNumber) return notify('Selecciona una mesa para continuar.');
-    const customTable = node.querySelector('#custom-table-input')?.value.trim();
-    if (customTable && Number(customTable) < 101) return notify('La mesa personalizada debe ser mayor a 100.');
+    const numericTable = Number(tableNumber);
+    if (!Number.isInteger(numericTable) || numericTable < 1 || numericTable > MAX_TABLES) return notify(`Selecciona una mesa del 01 al ${String(MAX_TABLES).padStart(2, '0')}.`);
     const singerName = selectedSingerName.trim() || 'Invitado';
     save({ ...state, queue: [...state.queue, { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() }] });
     selectedSong = null;
