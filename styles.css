@@ -94,6 +94,14 @@ a { color: inherit; text-decoration: none; }
 .song-modal-head img { width: 140px; height: 96px; object-fit: cover; border-radius: 12px; box-shadow: 0 16px 34px #0008; }
 .song-modal-head h2 { margin: 8px 0 6px; font-size: clamp(22px, 3vw, 34px); letter-spacing: -.04em; line-height: 1.05; }
 .song-modal-duration { color: var(--lime); font: 12px 'DM Mono', monospace; }
+.song-availability { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.song-availability .material-symbols-rounded { flex: 0 0 auto; font-size: 17px; }
+.song-availability.checking { color: #d9d0df; }
+.song-availability.checking .material-symbols-rounded { animation: muxo-spin 1.1s linear infinite; }
+.song-availability.available { color: var(--lime); }
+.song-availability.unavailable { color: #ff9a9a; }
+.song-availability.unknown { color: #f4c889; }
+.youtube-preflight { position: fixed; right: 0; bottom: 0; z-index: -1; width: 2px; height: 2px; overflow: hidden; opacity: 0; pointer-events: none; }
 .song-modal-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr); gap: 24px; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line-soft); }
 .modal-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .modal-section-head h3, .singer-picker h3 { margin: 7px 0 0; font-size: 22px; letter-spacing: -.04em; }
@@ -265,6 +273,7 @@ a { color: inherit; text-decoration: none; }
 .transition-logo { width: min(270px, 100%); }
 .transition-side p { margin: 20px 0 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
 @keyframes transition-in { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes muxo-spin { to { transform: rotate(360deg); } }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 20; padding: 13px 16px; color: #e8ffad; background: #1d2216; border: 1px solid #5b7131; border-radius: 12px; box-shadow: 0 15px 40px #0008; }
 .error { margin-top: 12px; color: var(--danger); font-size: 13px; }
 .muted { color: var(--muted); }

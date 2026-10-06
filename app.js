@@ -34,6 +34,9 @@ let displayVisualizerFrame = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
 let displayVideoError = false;
+let youtubePreflightPlayer = null;
+let youtubePreflightTimer = null;
+let youtubePreflightRequestId = 0;
 let transitionAmbientAudio = null;
 let commercialAudio = null;
 let commercialPlaybackId = 0;
@@ -142,6 +145,79 @@ function loadYoutubeApi() {
     document.head.append(script);
   });
   return youtubeApiPromise;
+}
+function destroyYoutubePreflight() {
+  clearTimeout(youtubePreflightTimer);
+  youtubePreflightTimer = null;
+  try { youtubePreflightPlayer?.destroy?.(); } catch (error) { console.warn('No se pudo cerrar la validación de YouTube.', error); }
+  youtubePreflightPlayer = null;
+  document.querySelectorAll('.youtube-preflight').forEach((node) => node.remove());
+}
+function youtubePreflightErrorMessage(code) {
+  if (code === 2) return 'YouTube reportó un video inválido.';
+  if (code === 5) return 'YouTube no puede reproducir este video en el navegador.';
+  if (code === 100) return 'El video fue eliminado o es privado.';
+  if (code === 101 || code === 150) return 'El propietario no permite reproducir este video dentro de Muxo.';
+  return 'YouTube no permite verificar este video para la pantalla.';
+}
+function songAvailabilityMarkup(song) {
+  const status = song.availabilityStatus || 'checking';
+  const config = {
+    checking: { icon: 'progress_activity', label: 'Verificando compatibilidad con la pantalla…' },
+    available: { icon: 'check_circle', label: 'Compatible con la pantalla' },
+    unavailable: { icon: 'error', label: song.availabilityMessage || 'No se puede reproducir en la pantalla.' },
+    unknown: { icon: 'help', label: song.availabilityMessage || 'No se pudo verificar; se comprobará al reproducir.' },
+  }[status] || { icon: 'help', label: 'No se pudo verificar; se comprobará al reproducir.' };
+  return `<div class="song-availability ${escapeHtml(status)}" role="status" aria-live="polite">${icon(config.icon)}<span>${escapeHtml(config.label)}</span></div>`;
+}
+async function validateSongForDisplay(song) {
+  const requestId = ++youtubePreflightRequestId;
+  destroyYoutubePreflight();
+  try {
+    await loadYoutubeApi();
+    if (requestId !== youtubePreflightRequestId || selectedSong?.id !== song.id) return;
+    const host = document.createElement('div');
+    host.className = 'youtube-preflight';
+    host.id = `youtube-preflight-${requestId}`;
+    document.body.append(host);
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      let readyTimer = null;
+      const finish = (status, message) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(youtubePreflightTimer);
+        clearTimeout(readyTimer);
+        resolve({ status, message });
+      };
+      youtubePreflightTimer = setTimeout(() => finish('unknown', 'No se pudo verificar a tiempo; se comprobará al reproducir.'), 7000);
+      try {
+        youtubePreflightPlayer = new window.YT.Player(host.id, {
+          width: '2',
+          height: '2',
+          videoId: song.id,
+          playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0, enablejsapi: 1, origin: location.origin, widget_referrer: location.href },
+          events: {
+            onReady: (event) => {
+              event.target.cueVideoById(song.id);
+              readyTimer = setTimeout(() => finish('available', 'Compatible con la pantalla.'), 1400);
+            },
+            onError: (event) => finish('unavailable', youtubePreflightErrorMessage(Number(event.data))),
+          },
+        });
+      } catch (error) {
+        finish('unknown', 'No se pudo verificar a tiempo; se comprobará al reproducir.');
+      }
+    });
+    if (requestId !== youtubePreflightRequestId || selectedSong?.id !== song.id) return;
+    destroyYoutubePreflight();
+    selectedSong = { ...selectedSong, availabilityStatus: result.status, availabilityMessage: result.message };
+    renderSelection();
+  } catch (error) {
+    if (requestId !== youtubePreflightRequestId || selectedSong?.id !== song.id) return;
+    selectedSong = { ...selectedSong, availabilityStatus: 'unknown', availabilityMessage: 'No se pudo verificar a tiempo; se comprobará al reproducir.' };
+    renderSelection();
+  }
 }
 function postYoutubeCommand(func, args = []) {
   if (!displayPlayer || typeof displayPlayer[func] !== 'function') return false;
@@ -726,13 +802,14 @@ function syncSelectionModal() {
   const label = document.querySelector('#selected-table-label');
   if (label) label.textContent = selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa';
   const addButton = document.querySelector('#add-button');
-  if (addButton) addButton.disabled = !selectedTableNumber;
+  if (addButton) addButton.disabled = !selectedTableNumber || !selectedSong || ['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
 }
 function openSongModal(song) {
-  selectedSong = { ...song, durationLabel: 'Consultando duración…' };
+  selectedSong = { ...song, availabilityStatus: 'checking', availabilityMessage: '', durationLabel: 'Consultando duración…' };
   selectedTableNumber = '';
   selectedSingerName = '';
   renderSelection();
+  validateSongForDisplay(song);
   youtubeRequest('videos', { part: 'contentDetails,snippet', id: song.id, key: YOUTUBE_API_KEY })
     .then((data) => {
       const details = data.items?.[0];
@@ -751,20 +828,27 @@ function renderSelection() {
   if (!node) return;
   document.removeEventListener('keydown', selectionKeydownHandler);
   selectionKeydownHandler = null;
-  if (!selectedSong) { node.innerHTML = ''; return; }
-  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div></div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${selectedTableNumber ? '' : 'disabled'}>${icon('playlist_add')}Agregar a la cola</button></div></div></section></div>`;
+  if (!selectedSong) { destroyYoutubePreflight(); node.innerHTML = ''; return; }
+  const canAddSong = selectedTableNumber && !['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
+  const addLabel = selectedSong.availabilityStatus === 'unknown' ? 'Agregar sin validar' : 'Agregar a la cola';
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
     selectedSong = null;
+    youtubePreflightRequestId += 1;
+    destroyYoutubePreflight();
     renderSelection();
   };
   document.addEventListener('keydown', selectionKeydownHandler);
   requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #close-song-modal')?.focus());
-  node.querySelector('#close-song-modal')?.addEventListener('click', () => { selectedSong = null; renderSelection(); });
-  node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') { selectedSong = null; renderSelection(); } });
+  const closeSongModal = () => { selectedSong = null; youtubePreflightRequestId += 1; destroyYoutubePreflight(); renderSelection(); };
+  node.querySelector('#close-song-modal')?.addEventListener('click', closeSongModal);
+  node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') closeSongModal(); });
   node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; syncSelectionModal(); }));
   node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
   node.querySelector('#add-button')?.addEventListener('click', () => {
+    if (selectedSong.availabilityStatus === 'checking') return notify('Espera la verificación de YouTube.');
+    if (selectedSong.availabilityStatus === 'unavailable') return notify('Esta versión no se puede reproducir en la pantalla. Elige otra canción.');
     const tableNumber = selectedTableNumber.trim();
     if (!tableNumber) return notify('Selecciona una mesa para continuar.');
     const numericTable = Number(tableNumber);
@@ -774,6 +858,8 @@ function renderSelection() {
     selectedSong = null;
     selectedTableNumber = '';
     selectedSingerName = '';
+    youtubePreflightRequestId += 1;
+    destroyYoutubePreflight();
     renderSelection();
     notify('Canción agregada a la cola.');
   });
