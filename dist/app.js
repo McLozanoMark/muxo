@@ -957,7 +957,7 @@ function displayVisualizerMarkup() {
 }
 function displayIdleLightingMarkup() {
   const spotlights = Array.from({ length: 4 }, (_, index) => `<span class="idle-spotlight idle-spotlight-${index + 1}"></span>`).join('');
-  return `<div class="idle-stage-atmosphere" aria-hidden="true"><div class="idle-stage-wall"></div><div class="idle-rig idle-rig-top"></div><div class="idle-rig idle-rig-left"></div><div class="idle-rig idle-rig-right"></div><div class="idle-ceiling-bars"></div><div class="idle-spotlights">${spotlights}</div><div class="idle-stage-floor"></div></div>`;
+  return `<div class="idle-stage-atmosphere" aria-hidden="true"><div class="idle-spotlights">${spotlights}</div></div>`;
 }
 function displayView(transition = false) {
   const current = state.nowPlaying;

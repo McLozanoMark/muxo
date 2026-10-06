@@ -207,18 +207,10 @@ a { color: inherit; text-decoration: none; }
 .idle { display: grid; place-content: center; height: 100%; text-align: center; }
 .idle h1 { margin: 20px 0; font-size: clamp(44px, 8vw, 100px); letter-spacing: -.08em; }
 .idle p { color: var(--muted); font-size: 18px; }
-.idle-stage { position: relative; isolation: isolate; overflow: hidden; background: #10154c; }
-.idle-stage::before { position: absolute; inset: 0; z-index: -2; background: linear-gradient(180deg, #2732a8 0, #151b67 35%, #101448 72%, #0a0c2a 100%); content: ''; }
-.idle-stage::after { position: absolute; inset: 0; z-index: 3; background: linear-gradient(180deg, #ffffff12 0, transparent 14%, transparent 70%, #04051a70 100%), radial-gradient(ellipse at 50% 45%, transparent 0 42%, #07091e66 100%); content: ''; pointer-events: none; }
-.idle-stage-atmosphere { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.idle-stage-wall { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 38%, #7888ff2e 0, #303bba18 34%, transparent 67%), linear-gradient(180deg, transparent 0 48%, #070a2a42 100%); animation: idle-wall-breathe 12s ease-in-out infinite alternate; }
-.idle-rig { position: absolute; z-index: 2; overflow: hidden; border: 2px solid #d9e2ffad; background-color: #172052; box-shadow: 0 0 9px #b8c8ff9c, inset 0 0 5px #dbe5ff55; opacity: .88; }
-.idle-rig::before, .idle-rig::after { position: absolute; inset: -4px; background: repeating-linear-gradient(34deg, transparent 0 22px, #e1e8ffb8 23px 25px, transparent 26px 46px), repeating-linear-gradient(-34deg, transparent 0 22px, #e1e8ffb8 23px 25px, transparent 26px 46px); content: ''; opacity: .75; }
-.idle-rig-top { top: 4%; left: 10%; width: 80%; height: clamp(34px, 5vw, 58px); }
-.idle-rig-left, .idle-rig-right { top: 4%; width: clamp(30px, 4vw, 52px); height: 88%; }
-.idle-rig-left { left: 2.5%; }
-.idle-rig-right { right: 2.5%; }
-.idle-ceiling-bars { position: absolute; top: 14%; left: 18%; width: 64%; height: 15%; opacity: .4; background: repeating-linear-gradient(90deg, transparent 0 16%, #dbe5ff55 16.2% 16.8%, transparent 17% 33%), repeating-linear-gradient(0deg, transparent 0 28%, #dbe5ff66 28.5% 30%, transparent 30.5% 58%); transform: perspective(180px) rotateX(56deg); transform-origin: 50% 0; }
+.idle-stage { position: relative; isolation: isolate; overflow: hidden; background: #08050d url('./muxo-idle-background.png') center / cover no-repeat; }
+.idle-stage::before { position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, #0503072b 0, #09050f24 50%, #03020570 100%); content: ''; }
+.idle-stage::after { position: absolute; inset: 0; z-index: 3; background: linear-gradient(180deg, #05030718 0, transparent 17%, transparent 70%, #03020572 100%), radial-gradient(ellipse at 50% 48%, transparent 0 46%, #05030745 100%); content: ''; pointer-events: none; }
+.idle-stage-atmosphere { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .idle-spotlights { position: absolute; inset: 0; z-index: 2; }
 .idle-spotlight { position: absolute; top: 17%; width: clamp(16px, 2.3vw, 30px); height: clamp(16px, 2.3vw, 30px); border-radius: 50%; background: #fff; box-shadow: 0 0 11px 5px #fff, 0 0 38px 15px #aab5ff, 0 0 78px 26px #5c68ff9c; animation: idle-spotlight-pulse 5s ease-in-out infinite alternate; }
 .idle-spotlight::before { position: absolute; top: 70%; left: 50%; width: clamp(90px, 13vw, 210px); height: clamp(300px, 56vh, 650px); background: linear-gradient(180deg, #eaf0ffad 0, #b9c5ff4a 18%, #7e8cff1c 52%, transparent 92%); clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%); filter: blur(8px); opacity: .6; transform: translateX(-50%); transform-origin: 50% 0; content: ''; animation: idle-beam-sweep 9s ease-in-out infinite alternate; }
@@ -228,14 +220,12 @@ a { color: inherit; text-decoration: none; }
 .idle-spotlight-3 { right: 23%; top: 18%; transform: scale(.68); animation-delay: -2.1s; }
 .idle-spotlight-4 { right: 12%; animation-delay: -4.2s; }
 .idle-spotlight-2::before, .idle-spotlight-3::before { animation-delay: -3s; }
-.idle-stage-floor { position: absolute; right: -10%; bottom: -26%; left: -10%; height: 43%; border-top: 1px solid #d8e1ff4a; background: linear-gradient(180deg, #21266e 0, #090a26 74%); transform: perspective(520px) rotateX(59deg); transform-origin: 50% 0; box-shadow: 0 -20px 80px #7a86ff24; }
 .idle-copy { position: absolute; right: 0; bottom: 9%; left: 0; z-index: 4; padding: 24px; text-align: center; text-shadow: 0 3px 30px #000; }
 .idle-copy h1 { margin: 12px 0 8px; color: #ffffffc7; font-size: clamp(24px, 4vw, 52px); letter-spacing: -.06em; }
 .idle-copy p { color: #dbe0ff99; font-size: 14px; }
-@keyframes idle-wall-breathe { from { transform: scale(1); opacity: .78; } to { transform: scale(1.06); opacity: 1; } }
 @keyframes idle-spotlight-pulse { from { opacity: .78; } to { opacity: 1; } }
 @keyframes idle-beam-sweep { from { rotate: -4deg; opacity: .28; } to { rotate: 4deg; opacity: .7; } }
-@media (prefers-reduced-motion: reduce) { .idle-stage-wall, .idle-spotlight, .idle-spotlight::before { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .idle-spotlight, .idle-spotlight::before { animation: none; } }
 .display-transition { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 40%, #32183dd9 0, #050307f5 62%), #050307f5; }
 .display-transition[hidden] { display: none; }
 .display-video-error { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 42%, #32183df2 0, #050307f8 64%), #050307f8; }
