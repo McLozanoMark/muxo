@@ -14,6 +14,9 @@ const MAX_SINGER_SUGGESTIONS = 24;
 const ROOM_STATUSES = ['open', 'paused', 'closed'];
 const OPERATOR_LEASE_MS = 45000;
 const OPERATOR_HEARTBEAT_MS = 10000;
+const DISPLAY_TRANSITION_MAX_MS = 36000;
+const COMMERCIAL_AUDIO_MAX_WAIT_MS = 10000;
+const SPEECH_PHRASE_MAX_WAIT_MS = 8500;
 const freshSession = () => emptyRoomSession();
 const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], singerSuggestions: {}, roomStatus: 'open', playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
 const app = document.querySelector('#app');
@@ -50,6 +53,7 @@ let youtubePreflightRequestId = 0;
 let transitionAmbientAudio = null;
 let commercialAudio = null;
 let commercialPlaybackId = 0;
+let commercialPlaybackTimer = null;
 let selectionKeydownHandler = null;
 let operatorLeaseTimer = null;
 let operatorLockError = '';
@@ -563,6 +567,8 @@ function getCommercialAudio() {
 }
 function stopCommercialAudio() {
   commercialPlaybackId += 1;
+  clearTimeout(commercialPlaybackTimer);
+  commercialPlaybackTimer = null;
   if (!commercialAudio) return;
   commercialAudio.pause();
   commercialAudio.currentTime = 0;
@@ -572,13 +578,20 @@ function stopCommercialAudio() {
 function playCommercialAudio(onFinished) {
   const audio = getCommercialAudio();
   const playbackId = ++commercialPlaybackId;
+  clearTimeout(commercialPlaybackTimer);
   audio.pause();
   audio.currentTime = 0;
+  let settled = false;
   const finish = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(commercialPlaybackTimer);
+    commercialPlaybackTimer = null;
     if (playbackId === commercialPlaybackId) onFinished?.();
   };
   audio.onended = finish;
   audio.onerror = finish;
+  commercialPlaybackTimer = setTimeout(finish, COMMERCIAL_AUDIO_MAX_WAIT_MS);
   const playRequest = audio.play();
   playRequest?.catch?.(finish);
 }
@@ -620,8 +633,23 @@ function speakDisplayTransition(current) {
       }
       const phrase = phrases[index++];
       const utterance = createSpeechUtterance(phrase.text);
-      utterance.onend = () => setTimeout(speakNext, phrase.pauseAfter);
-      utterance.onerror = () => setTimeout(speakNext, phrase.pauseAfter);
+      let phraseSettled = false;
+      let phraseTimer = null;
+      const settlePhrase = () => {
+        if (phraseSettled || !displayTransitionActive) return;
+        phraseSettled = true;
+        clearTimeout(phraseTimer);
+        setTimeout(speakNext, phrase.pauseAfter);
+      };
+      phraseTimer = setTimeout(() => {
+        showAudioActivation();
+        settlePhrase();
+      }, Math.min(SPEECH_PHRASE_MAX_WAIT_MS, Math.max(4000, phrase.text.length * 110)));
+      utterance.onstart = () => {
+        if (!localStorage.getItem('muxo-audio-enabled')) showAudioActivation();
+      };
+      utterance.onend = settlePhrase;
+      utterance.onerror = settlePhrase;
       window.speechSynthesis.speak(utterance);
     };
     speakNext();
@@ -662,6 +690,7 @@ function showAudioActivation() {
     displayPlayer?.unMute?.();
     syncDisplayVolume();
     window.speechSynthesis?.resume();
+    startTransitionAmbientAudio();
     postYoutubeCommand('playVideo');
     overlay.hidden = true;
     localStorage.setItem('muxo-audio-enabled', 'true');
@@ -680,6 +709,7 @@ function ensureDisplayPlayback() {
   }, 900);
 }
 function finishDisplayTransition() {
+  if (!displayTransitionActive) return;
   clearTimeout(displayTransitionTimer);
   displayTransitionTimer = null;
   window.speechSynthesis?.cancel();
@@ -696,6 +726,11 @@ function finishDisplayTransition() {
 }
 function beginDisplayTransition(current) {
   displayTransitionActive = true;
+  clearTimeout(displayTransitionTimer);
+  displayTransitionTimer = setTimeout(() => {
+    showAudioActivation();
+    finishDisplayTransition();
+  }, DISPLAY_TRANSITION_MAX_MS);
   stopAnnouncementAudio();
   postYoutubeCommand('pauseVideo');
   const overlay = document.querySelector('#display-transition');
