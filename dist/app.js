@@ -10,10 +10,11 @@ const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_ID_LENGTH = 6;
 const MAX_TABLES = 20;
 const MAX_SINGER_SUGGESTIONS = 24;
+const ROOM_STATUSES = ['open', 'paused', 'closed'];
 const OPERATOR_LEASE_MS = 45000;
 const OPERATOR_HEARTBEAT_MS = 10000;
 const freshSession = () => emptyRoomSession();
-const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], singerSuggestions: {}, playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
+const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], singerSuggestions: {}, roomStatus: 'open', playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
 const app = document.querySelector('#app');
 let state = freshSession();
 let selectedSong = null;
@@ -22,6 +23,7 @@ let selectedSingerName = '';
 let singerSuggestionQuery = '';
 let showAllSingerSuggestions = false;
 let manageSingerSuggestions = false;
+let queueSearchQuery = '';
 let searchState = { query: '', mode: 'recommendations', channelId: null, pageSize: 10, page: 1, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
 let recommendationsLoading = false;
 let saveTimer = null;
@@ -80,6 +82,16 @@ function roomIdFromLocation() {
 }
 function roomHref(role) { return `#${role}${activeRoomId ? `?room=${encodeURIComponent(activeRoomId)}` : ''}`; }
 function localSessionKey(roomId = activeRoomId) { return `${localKey}-${roomId || 'local'}`; }
+function roomStatus() { return ROOM_STATUSES.includes(state.roomStatus) ? state.roomStatus : 'open'; }
+function roomStatusLabel(status = roomStatus()) { return status === 'paused' ? 'Pausada' : status === 'closed' ? 'Cerrada' : 'Abierta'; }
+function roomStatusIcon(status = roomStatus()) { return status === 'open' ? 'radio_button_checked' : status === 'paused' ? 'pause_circle' : 'lock'; }
+function canManageRoom() { return currentRole() === 'operator' || deviceMode() === 'operator'; }
+function canAcceptRequests() { return roomStatus() === 'open' || canManageRoom(); }
+function roomStatusMarkup() {
+  const status = roomStatus();
+  return `<span class="room-status room-status-${status}">${icon(roomStatusIcon(status))}${roomStatusLabel(status)}</span>`;
+}
+function roomAccessUrl() { return `${location.origin}${location.pathname}#waiter?room=${encodeURIComponent(activeRoomId ?? '')}`; }
 function localSingerMemoryKey(roomId = activeRoomId) { return `${localKey}-singers-${roomId || 'local'}`; }
 function tableMemoryKey(value) {
   const numeric = Number(value);
@@ -808,6 +820,7 @@ function save(next) {
         [`rooms.${activeRoomId}.nowPlaying`]: state.nowPlaying,
         [`rooms.${activeRoomId}.queue`]: state.queue,
         [`rooms.${activeRoomId}.recent`]: state.recent,
+        [`rooms.${activeRoomId}.roomStatus`]: roomStatus(),
         [`rooms.${activeRoomId}.playback`]: state.playback,
         [`rooms.${activeRoomId}.updatedAt`]: Date.now(),
       });
@@ -817,10 +830,24 @@ function save(next) {
     }
   }, 120);
 }
+function setRoomStatus(status) {
+  if (!canManageRoom() || !ROOM_STATUSES.includes(status) || status === roomStatus()) return;
+  save({ ...state, roomStatus: status });
+  notify(`Sala ${roomStatusLabel(status).toLowerCase()}.`);
+}
+async function copyRoomAccess() {
+  const accessUrl = roomAccessUrl();
+  try {
+    await navigator.clipboard.writeText(accessUrl);
+    notify('Enlace de acceso copiado.');
+  } catch (error) {
+    notify(`Código de sala: ${activeRoomId}`);
+  }
+}
 function nav(active, display = false) {
-  if (display) return `<header class="display-top"><a class="brand" href="${roomHref('display')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>${icon('mic_external_on')} SALA ${escapeHtml(activeRoomId ?? '')} · EN VIVO</span><span class="muted">${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</span></header>`;
+  if (display) return `<header class="display-top"><a class="brand" href="${roomHref('display')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>${icon('mic_external_on')} SALA ${escapeHtml(activeRoomId ?? '')} · EN VIVO ${roomStatus() !== 'open' ? `· ${escapeHtml(roomStatusLabel().toUpperCase())}` : ''}</span><span class="muted">${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</span></header>`;
   const operatorLink = canAccessOperator() ? `<a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a>` : '';
-  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'}</span><div class="top-actions"><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a>${operatorLink}</nav>`;
+  return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'} ${roomStatusMarkup()}</span><div class="top-actions"><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a>${operatorLink}</nav>`;
 }
 function roomCodeForm() {
   return `<div class="room-access-divider" aria-hidden="true"><span>o escribe el código</span></div><form id="join-room-form" class="room-join-form"><label for="room-code-input">Código de sala</label><div class="room-join-controls"><input id="room-code-input" class="input" maxlength="${ROOM_ID_LENGTH}" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="Ej. D7B3HL" aria-describedby="room-code-hint"/><button class="button" type="submit">${icon('login')}Entrar</button></div><small id="room-code-hint">Usa las ${ROOM_ID_LENGTH} letras o números que aparecen en el enlace de la sala.</small></form>`;
@@ -838,7 +865,9 @@ function roomAccessView() {
   return `<div class="room-gate"><div class="room-gate-card"><div class="room-gate-brand">${logoMarkup('room-logo')}</div><div class="room-pairing-layout"><div class="room-pairing-mark"><span class="room-pairing-ring"></span>${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')}</div><div class="room-pairing-copy"><div class="eyebrow">${icon(role === 'operator' ? 'queue_music' : role === 'display' ? 'tv' : 'person')} ACCESO DE ${escapeHtml(roleLabel(role).toUpperCase())}</div><h1>${title}</h1><p>${description}</p></div></div>${roleSwitchMarkup(role)}${lockMessage}${action}</div></div>`;
 }
 function waiterView() {
-  return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><label class="sr-only" for="search-input">Artista o canción</label><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error" role="status" aria-live="polite"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
+  const status = roomStatus();
+  const statusMessage = status === 'paused' ? 'La sala está pausada. El encargado puede reabrir las solicitudes.' : status === 'closed' ? 'La sala está cerrada para nuevas solicitudes.' : '';
+  return `<div class="shell">${nav('waiter')}<main class="page waiter-page">${statusMessage ? `<div class="room-status-banner room-status-banner-${status}" data-room-status-banner="${status}" role="status">${icon(status === 'paused' ? 'pause_circle' : 'lock')}<span>${statusMessage}</span></div>` : ''}<section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><label class="sr-only" for="search-input">Artista o canción</label><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off" ${canAcceptRequests() ? '' : 'disabled'}/><button id="search-button" class="button" ${canAcceptRequests() ? '' : 'disabled'}>${icon('search')}<span>Buscar</span></button></div><div id="search-error" role="status" aria-live="polite"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
 }
 function youtubeSearchItemToSong(item, isPriority = false) {
   const snippet = item.snippet ?? {};
@@ -867,7 +896,9 @@ function renderResults(results) {
   const lastResult = firstResult + results.length - 1;
   const total = searchState.totalResults ? ` de ${searchState.totalResults.toLocaleString('es-PE')}` : '';
   const resultsLabel = searchState.mode === 'recommendations' ? `Recomendados · ${PRIORITY_CHANNEL_NAME}` : 'Resultados de búsqueda';
-  node.innerHTML = `<div class="results-toolbar"><div><strong>${escapeHtml(resultsLabel)}</strong><span class="muted"> · ${firstResult}–${lastResult}${total} · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info">${song.isPriority ? `<span class="priority-channel">${icon('star')}RECOMENDADO · ${escapeHtml(PRIORITY_CHANNEL_NAME)}</span>` : ''}<div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
+  const requestsEnabled = canAcceptRequests();
+  const chooseLabel = roomStatus() === 'paused' ? 'Sala pausada' : roomStatus() === 'closed' ? 'Sala cerrada' : 'Elegir';
+  node.innerHTML = `<div class="results-toolbar"><div><strong>${escapeHtml(resultsLabel)}</strong><span class="muted"> · ${firstResult}–${lastResult}${total} · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info">${song.isPriority ? `<span class="priority-channel">${icon('star')}RECOMENDADO · ${escapeHtml(PRIORITY_CHANNEL_NAME)}</span>` : ''}<div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}" ${requestsEnabled ? '' : 'disabled'}>${icon(requestsEnabled ? 'playlist_add' : roomStatusIcon())}${chooseLabel}</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
   node.querySelectorAll('.choose-song').forEach((button) => button.addEventListener('click', () => openSongModal(JSON.parse(button.dataset.song))));
   node.querySelector('#page-size')?.addEventListener('change', (event) => {
     searchState.pageSize = Number(event.target.value);
@@ -960,6 +991,23 @@ function clearSingerSuggestions(tableNumber) {
   singerSuggestionQuery = '';
   renderSingerSuggestionPanel();
 }
+function duplicateQueueRequest() {
+  if (!selectedSong?.id || !selectedTableNumber) return null;
+  const candidates = [...(state.nowPlaying ? [state.nowPlaying] : []), ...(state.queue ?? [])];
+  return candidates.find((request) => request.youtubeVideoId === selectedSong.id && String(request.tableNumber) === String(selectedTableNumber)) || null;
+}
+function syncDuplicateQueueWarning() {
+  const node = document.querySelector('#duplicate-queue-warning');
+  if (!node) return;
+  const duplicate = duplicateQueueRequest();
+  if (!duplicate) {
+    node.hidden = true;
+    node.innerHTML = '';
+    return;
+  }
+  node.hidden = false;
+  node.innerHTML = `${icon('info')}<span>Esta versión ya está en la cola de la mesa ${formatSelectedTable(selectedTableNumber)}. Puedes agregarla de todos modos si hay más de un cantante.</span>`;
+}
 function closeSongSelection() {
   selectedSong = null;
   selectedTableNumber = '';
@@ -972,6 +1020,10 @@ function closeSongSelection() {
   renderSelection();
 }
 function openSongModal(song) {
+  if (!canAcceptRequests()) {
+    notify(roomStatus() === 'paused' ? 'La sala está pausada para nuevas solicitudes.' : 'La sala está cerrada para nuevas solicitudes.');
+    return;
+  }
   selectedSong = { ...song, availabilityStatus: 'checking', availabilityMessage: '', durationLabel: 'Consultando duración…' };
   selectedTableNumber = '';
   selectedSingerName = '';
@@ -1017,7 +1069,7 @@ function renderSelection() {
   }
   const canAddSong = selectedTableNumber && !['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
   const addLabel = selectedSong.availabilityStatus === 'unknown' ? 'Agregar sin validar' : 'Agregar a la cola';
-  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/>${singerSuggestionPanelMarkup()}<button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><div id="duplicate-queue-warning" class="queue-warning" role="status" hidden></div>${singerSuggestionPanelMarkup()}<button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
     closeSongSelection();
@@ -1028,7 +1080,8 @@ function renderSelection() {
   node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') closeSongSelection(); });
   bindSingerSuggestionControls();
   node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; selectedSingerName = ''; singerSuggestionQuery = ''; showAllSingerSuggestions = false; manageSingerSuggestions = false; renderSelection(); }));
-  node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
+  node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; syncDuplicateQueueWarning(); });
+  syncDuplicateQueueWarning();
   node.querySelector('#add-button')?.addEventListener('click', () => {
     if (selectedSong.availabilityStatus === 'checking') return notify('Espera la verificación de YouTube.');
     if (selectedSong.availabilityStatus === 'unavailable') return notify('Esta versión no se puede reproducir en la pantalla. Elige otra canción.');
@@ -1076,6 +1129,7 @@ async function loadRecommendedVideos({ pageToken = '', pageNumber = 1 } = {}) {
 }
 async function searchYoutube({ pageToken = '', pageNumber = 1 } = {}) {
   const input = document.querySelector('#search-input'); const button = document.querySelector('#search-button'); const error = document.querySelector('#search-error');
+  if (!canAcceptRequests()) return notify(roomStatus() === 'paused' ? 'La sala está pausada para nuevas solicitudes.' : 'La sala está cerrada para nuevas solicitudes.');
   const query = input.value.trim() || searchState.query; if (!query) return notify('Escribe una canción o artista.');
   searchState = { ...searchState, query, mode: 'search', page: pageNumber, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
   button.disabled = true; button.textContent = 'Buscando…'; error.innerHTML = '';
@@ -1094,9 +1148,24 @@ function operatorView() {
   const position = Number(playbackState().position) || 0;
   const duration = Number(playbackState().duration) || 0;
   const progress = duration > 0 ? Math.max(0, Math.min(100, (position / duration) * 100)) : 0;
-  return `<div class="shell">${nav('operator')}<main class="page"><div class="page-head"><div><div class="eyebrow">CENTRAL DEL ENCARGADO</div><h1>La cola de esta noche</h1><p>Controla el ritmo del show. Solo el encargado puede avanzar el turno.</p></div><div class="page-head-actions"><span class="room-code-display"><span class="room-code-label">CÓDIGO DE SALA</span><strong>${escapeHtml(activeRoomId ?? '')}</strong></span><span class="badge">${icon('queue_music')}${state.queue.length} turnos pendientes</span></div></div><div class="operator-grid"><section class="card now-card">${current ? `<div><div class="now-track"><img class="now-art" src="${escapeHtml(current.thumbnail)}" alt=""/><div class="now-track-copy"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA <span class="play-status">${icon(playbackState().command?.action === 'pause' ? 'pause_circle' : 'play_circle')} ${playbackLabel()}</span></div><h2>${escapeHtml(current.singerName)}</h2><div class="song-name">${escapeHtml(current.songTitle)}</div></div></div><div class="playback-controls"><button id="pause-button" class="button secondary icon-action" title="Pausar" aria-label="Pausar">${icon('pause')}<span>Pausar</span></button><button id="play-button" class="button secondary icon-action" title="Reproducir" aria-label="Reproducir">${icon('play_arrow')}<span>Reproducir</span></button><button id="restart-button" class="button secondary icon-action" title="Reproducir desde cero" aria-label="Reproducir desde cero">${icon('restart_alt')}<span>Desde cero</span></button><div class="volume-control"><button id="volume-down-button" class="icon-button" title="Bajar volumen" aria-label="Bajar volumen">${icon('volume_down')}</button><span id="volume-label">Volumen ${playbackVolume()}%</span><button id="volume-up-button" class="icon-button" title="Subir volumen" aria-label="Subir volumen">${icon('volume_up')}</button></div></div><div class="playback-progress"><div class="progress-meta"><span>${formatTime(position)}</span><span>${duration > 0 ? `-${formatTime(Math.max(0, duration - position))}` : '--:--'}</span></div><div class="progress-track" role="progressbar" aria-label="Progreso de la canción" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><span style="width:${progress}%"></span></div></div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span><div class="toolbar"><button id="absent-button" class="button secondary icon-action" title="Marcar como ausente" aria-label="Marcar como ausente">${icon('person_off')}<span>No está</span></button><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Siguiente</span></button></div></div>` : `<div><div class="eyebrow">TURNO ACTUAL</div><h2>Listo para el próximo turno</h2><div class="song-name">La pantalla mostrará la siguiente canción cuando avances.</div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}${state.queue.length} EN ESPERA</span><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Reproducir siguiente</span></button></div>`}</section><section class="card queue-card"><div class="section-title"><h2>${icon('queue_music')}Próximos turnos</h2><span class="muted">${state.queue.length}</span></div><div id="queue-list">${queueRows()}</div></section></div></main><a class="display-launch-button" href="${roomHref('display')}">${icon('tv')}<span>Abrir visualización</span></a></div>`;
+  const status = roomStatus();
+  const statusButtons = ROOM_STATUSES.map((roomState) => `<button type="button" class="room-status-button ${status === roomState ? 'active' : ''}" data-room-status="${roomState}">${icon(roomStatusIcon(roomState))}<span>${roomStatusLabel(roomState)}</span></button>`).join('');
+  return `<div class="shell">${nav('operator')}<main class="page"><div class="page-head"><div><div class="eyebrow">CENTRAL DEL ENCARGADO</div><h1>La cola de esta noche</h1><p>Controla el ritmo del show. Solo el encargado puede avanzar el turno.</p></div><div class="page-head-actions"><div class="room-code-display"><span class="room-code-label">CÓDIGO DE SALA</span><strong>${escapeHtml(activeRoomId ?? '')}</strong><button id="copy-room-button" class="room-code-copy" type="button" title="Copiar enlace de acceso" aria-label="Copiar enlace de acceso">${icon('content_copy')}</button></div><span class="badge">${icon('queue_music')}${state.queue.length} turnos pendientes</span></div></div><section class="room-controls card"><div class="room-controls-copy"><div class="eyebrow">ESTADO DE SALA</div><strong>${roomStatusLabel(status)}</strong><span class="muted">Controla si los meseros pueden agregar nuevas canciones.</span></div><div class="room-status-controls" role="group" aria-label="Estado de sala">${statusButtons}</div></section><div class="operator-grid"><section class="card now-card">${current ? `<div><div class="now-track"><img class="now-art" src="${escapeHtml(current.thumbnail)}" alt=""/><div class="now-track-copy"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA <span class="play-status">${icon(playbackState().command?.action === 'pause' ? 'pause_circle' : 'play_circle')} ${playbackLabel()}</span></div><h2>${escapeHtml(current.singerName)}</h2><div class="song-name">${escapeHtml(current.songTitle)}</div></div></div><div class="playback-controls"><button id="pause-button" class="button secondary icon-action" title="Pausar" aria-label="Pausar">${icon('pause')}<span>Pausar</span></button><button id="play-button" class="button secondary icon-action" title="Reproducir" aria-label="Reproducir">${icon('play_arrow')}<span>Reproducir</span></button><button id="restart-button" class="button secondary icon-action" title="Reproducir desde cero" aria-label="Reproducir desde cero">${icon('restart_alt')}<span>Desde cero</span></button><div class="volume-control"><button id="volume-down-button" class="icon-button" title="Bajar volumen" aria-label="Bajar volumen">${icon('volume_down')}</button><span id="volume-label">Volumen ${playbackVolume()}%</span><button id="volume-up-button" class="icon-button" title="Subir volumen" aria-label="Subir volumen">${icon('volume_up')}</button></div></div><div class="playback-progress"><div class="progress-meta"><span>${formatTime(position)}</span><span>${duration > 0 ? `-${formatTime(Math.max(0, duration - position))}` : '--:--'}</span></div><div class="progress-track" role="progressbar" aria-label="Progreso de la canción" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><span style="width:${progress}%"></span></div></div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}MESA ${escapeHtml(current.tableNumber)}</span><div class="toolbar"><button id="absent-button" class="button secondary icon-action" title="Marcar como ausente" aria-label="Marcar como ausente">${icon('person_off')}<span>No está</span></button><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Siguiente</span></button></div></div>` : `<div><div class="eyebrow">TURNO ACTUAL</div><h2>Listo para el próximo turno</h2><div class="song-name">La pantalla mostrará la siguiente canción cuando avances.</div></div><div class="now-bottom"><span class="table-pill">${icon('table_restaurant')}${state.queue.length} EN ESPERA</span><button id="next-button" class="button icon-action" title="Reproducir siguiente" aria-label="Reproducir siguiente">${icon('skip_next')}<span>Reproducir siguiente</span></button></div>`}</section><section class="card queue-card"><div class="section-title"><h2>${icon('queue_music')}Próximos turnos</h2><span class="muted">${state.queue.length}</span></div><input id="queue-filter" class="input queue-filter" value="${escapeHtml(queueSearchQuery)}" placeholder="Filtrar por canción, cantante o mesa…" autocomplete="off"/><div id="queue-filter-empty" class="empty queue-filter-empty" hidden>No encontramos turnos con ese filtro.</div><div id="queue-list">${queueRows()}</div></section></div></main><a class="display-launch-button" href="${roomHref('display')}">${icon('tv')}<span>Abrir visualización</span></a></div>`;
 }
-function queueRows() { return state.queue.length ? state.queue.map((request,index) => `<div class="queue-row" draggable="true" data-queue-id="${request.id}" title="Arrastra para reordenar"><span class="queue-number">${String(index+1).padStart(2,'0')}</span><img class="queue-thumb" src="${escapeHtml(request.thumbnail)}" alt="" loading="lazy"/><div><div class="queue-title">${escapeHtml(request.songTitle)}</div><div class="queue-meta">${escapeHtml(request.singerName)} · ${icon('table_restaurant')} Mesa ${escapeHtml(request.tableNumber)}</div></div><div class="row-actions"><span class="drag-handle" aria-hidden="true">${icon('drag_indicator')}</span><button class="icon-button danger remove" title="Quitar de la cola" aria-label="Quitar de la cola" data-id="${request.id}">${icon('delete')}</button></div></div>`).join('') : '<div class="empty">No hay canciones en espera.</div>'; }
+function queueRows() { return state.queue.length ? state.queue.map((request,index) => `<div class="queue-row" draggable="true" data-queue-id="${request.id}" data-queue-search="${escapeHtml(`${request.songTitle} ${request.singerName} mesa ${request.tableNumber}`.toLocaleLowerCase('es-PE'))}" title="Arrastra para reordenar"><span class="queue-number">${String(index+1).padStart(2,'0')}</span><img class="queue-thumb" src="${escapeHtml(request.thumbnail)}" alt="" loading="lazy"/><div><div class="queue-title">${escapeHtml(request.songTitle)}</div><div class="queue-meta">${escapeHtml(request.singerName)} · ${icon('table_restaurant')} Mesa ${escapeHtml(request.tableNumber)}</div></div><div class="row-actions"><span class="drag-handle" aria-hidden="true">${icon('drag_indicator')}</span><button class="icon-button danger remove" title="Quitar de la cola" aria-label="Quitar de la cola" data-id="${request.id}">${icon('delete')}</button></div></div>`).join('') : '<div class="empty">No hay canciones en espera.</div>'; }
+function filterQueueRows(value = queueSearchQuery) {
+  queueSearchQuery = value;
+  const query = String(value ?? '').trim().toLocaleLowerCase('es-PE');
+  const rows = [...document.querySelectorAll('.queue-row')];
+  let visible = 0;
+  rows.forEach((row) => {
+    const matches = !query || (row.dataset.queueSearch ?? '').includes(query);
+    row.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  const empty = document.querySelector('#queue-filter-empty');
+  if (empty) empty.hidden = !query || visible > 0;
+}
 function captureWaiterFormState() {
   const fields = ['search-input', 'table-input', 'singer-input'];
   const activeElement = document.activeElement;
@@ -1208,15 +1277,58 @@ async function advanceQueue(expectedVideoId = null) {
   if (!next && !state.nowPlaying) return notify('La cola está vacía.');
   save({ ...state, nowPlaying: next ? { ...next, status: 'playing' } : null, queue: rest, recent: state.nowPlaying ? [{ ...state.nowPlaying, status: 'finished' }, ...state.recent].slice(0, 8) : state.recent, playback: { ...playbackState(), position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: playbackVolume(), createdAt: Date.now() } } });
 }
+async function markCurrentAbsent() {
+  if (!state.nowPlaying) return;
+  if (firebaseReady) {
+    try {
+      await runTransaction(firebaseDb, async (transaction) => {
+        const snapshot = await transaction.get(sessionDocument());
+        const live = snapshot.data()?.rooms?.[activeRoomId] ?? state;
+        if (!live.nowPlaying) return;
+        const [next, ...rest] = live.queue ?? [];
+        const absent = { ...live.nowPlaying, status: 'absent' };
+        const volume = Number(live.playback?.volume);
+        const safeVolume = Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : 100;
+        transaction.update(sessionDocument(), {
+          [`rooms.${activeRoomId}`]: {
+            ...live,
+            nowPlaying: next ? { ...next, status: 'playing' } : null,
+            queue: [...rest, absent],
+            playback: { ...(live.playback ?? {}), volume: safeVolume, position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: safeVolume, createdAt: Date.now() } },
+          },
+        });
+      });
+      return;
+    } catch (error) {
+      console.error(error);
+      notify('No se pudo mover el turno al final.');
+      return;
+    }
+  }
+  const [next, ...rest] = state.queue;
+  const absent = { ...state.nowPlaying, status: 'absent' };
+  save({ ...state, nowPlaying: next ? { ...next, status: 'playing' } : null, queue: [...rest, absent], playback: { ...playbackState(), position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: playbackVolume(), createdAt: Date.now() } } });
+}
+function removeQueueItem(requestId) {
+  const request = state.queue.find((item) => item.id === requestId);
+  if (!request) return;
+  if (!window.confirm(`¿Quitar "${request.songTitle}" de la cola?`)) return;
+  save({ ...state, queue: state.queue.filter((item) => item.id !== requestId) });
+  notify('Turno quitado de la cola.');
+}
 function bindOperator() {
   document.querySelector('#next-button')?.addEventListener('click', () => advanceQueue(state.nowPlaying?.youtubeVideoId ?? null));
-  document.querySelector('#absent-button')?.addEventListener('click', () => { if (!state.nowPlaying) return; save({ ...state, nowPlaying:null, queue:[...state.queue,{...state.nowPlaying,status:'absent'}] }); });
+  document.querySelector('#absent-button')?.addEventListener('click', () => markCurrentAbsent());
   document.querySelector('#pause-button')?.addEventListener('click', () => sendPlaybackCommand('pause'));
   document.querySelector('#play-button')?.addEventListener('click', () => sendPlaybackCommand('play'));
   document.querySelector('#restart-button')?.addEventListener('click', () => sendPlaybackCommand('restart'));
   document.querySelector('#volume-down-button')?.addEventListener('click', () => sendPlaybackCommand('set-volume', playbackVolume() - 10));
   document.querySelector('#volume-up-button')?.addEventListener('click', () => sendPlaybackCommand('set-volume', playbackVolume() + 10));
-  document.querySelectorAll('.remove').forEach((button) => button.addEventListener('click', () => save({ ...state, queue: state.queue.filter((item) => item.id !== button.dataset.id) })));
+  document.querySelector('#copy-room-button')?.addEventListener('click', copyRoomAccess);
+  document.querySelectorAll('[data-room-status]').forEach((button) => button.addEventListener('click', () => setRoomStatus(button.dataset.roomStatus)));
+  document.querySelector('#queue-filter')?.addEventListener('input', (event) => filterQueueRows(event.target.value));
+  document.querySelectorAll('.remove').forEach((button) => button.addEventListener('click', () => removeQueueItem(button.dataset.id)));
+  filterQueueRows(queueSearchQuery);
   bindQueueDragAndDrop();
 }
 function displayQueueMarkup() {
@@ -1259,9 +1371,12 @@ function updateWaiterInPlace() {
   const waiter = document.querySelector('.shell');
   const searchInput = document.querySelector('#search-input');
   if (!waiter || !searchInput) return false;
+  const shouldDisableRequests = !canAcceptRequests();
+  const banner = document.querySelector('[data-room-status-banner]');
+  if (searchInput.disabled !== shouldDisableRequests || Boolean(banner) !== (roomStatus() !== 'open') || banner?.dataset.roomStatus !== roomStatus()) return false;
   const queueCount = document.querySelector('#queue-count');
   if (queueCount) queueCount.textContent = state.queue.length;
-  const badge = document.querySelector('.page-head .badge');
+  const badge = document.querySelector('.waiter-summary .badge');
   if (badge) badge.innerHTML = `${icon('queue_music')}${state.queue.length} en cola`;
   if (selectedSong && selectedTableNumber) renderSingerSuggestionPanel();
   return true;
