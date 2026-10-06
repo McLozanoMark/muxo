@@ -174,6 +174,9 @@ function unavailableSongModalMarkup(song) {
   const message = song.availabilityMessage || 'Esta versión no se puede reproducir en la pantalla.';
   return `<div class="modal-backdrop song-unavailable-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-unavailable-title"><section class="song-unavailable-modal card"><div class="song-unavailable-glow" aria-hidden="true"><span class="song-unavailable-orb">${icon('play_disabled')}</span></div><div class="song-unavailable-brand">${logoMarkup('song-unavailable-logo')}</div><div class="eyebrow">MUXO · PANTALLA</div><h2 id="song-unavailable-title">Esta versión no puede reproducirse</h2><p>${escapeHtml(message)}</p><div class="song-unavailable-hint">Elige otra versión para que el show continúe sin interrupciones.</div><button id="dismiss-song-error" class="button">${icon('check')}Entendido</button></section></div>`;
 }
+function checkingSongModalMarkup() {
+  return `<div class="modal-backdrop song-checking-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-checking-title"><section class="song-unavailable-modal song-checking-modal card"><button id="cancel-song-check" class="icon-button modal-close" aria-label="Cancelar verificación">${icon('close')}</button><div class="song-unavailable-glow" aria-hidden="true"><span class="song-unavailable-orb song-checking-orb">${icon('progress_activity')}</span></div><div class="song-unavailable-brand">${logoMarkup('song-unavailable-logo')}</div><div class="eyebrow">MUXO · PANTALLA</div><h2 id="song-checking-title">Comprobando la versión</h2><p>Estamos verificando si esta canción puede mostrarse en el display.</p><div class="song-unavailable-hint">Un momento, estamos preparando la selección.</div></section></div>`;
+}
 async function validateSongForDisplay(song) {
   const requestId = ++youtubePreflightRequestId;
   destroyYoutubePreflight();
@@ -841,6 +844,14 @@ function renderSelection() {
   document.removeEventListener('keydown', selectionKeydownHandler);
   selectionKeydownHandler = null;
   if (!selectedSong) { destroyYoutubePreflight(); node.innerHTML = ''; return; }
+  if (selectedSong.availabilityStatus === 'checking') {
+    node.innerHTML = checkingSongModalMarkup();
+    selectionKeydownHandler = (event) => { if (event.key === 'Escape') closeSongSelection(); };
+    document.addEventListener('keydown', selectionKeydownHandler);
+    node.querySelector('#cancel-song-check')?.addEventListener('click', closeSongSelection);
+    requestAnimationFrame(() => node.querySelector('#cancel-song-check')?.focus());
+    return;
+  }
   if (selectedSong.availabilityStatus === 'unavailable') {
     node.innerHTML = unavailableSongModalMarkup(selectedSong);
     selectionKeydownHandler = (event) => { if (event.key === 'Escape') closeSongSelection(); };
