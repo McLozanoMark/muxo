@@ -682,6 +682,7 @@ function hideDisplayVideoError() {
   if (errorOverlay) errorOverlay.hidden = true;
 }
 function showAudioActivation() {
+  if (localStorage.getItem('muxo-audio-enabled') === 'true') return;
   const overlay = document.querySelector('#audio-activation');
   if (!overlay) return;
   overlay.hidden = false;
