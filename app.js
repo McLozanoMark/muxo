@@ -18,7 +18,8 @@ let state = freshSession();
 let selectedSong = null;
 let selectedTableNumber = '';
 let selectedSingerName = '';
-let searchState = { query: '', pageSize: 10, page: 1, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
+let searchState = { query: '', mode: 'recommendations', channelId: null, pageSize: 10, page: 1, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
+let recommendationsLoading = false;
 let saveTimer = null;
 let firebaseDb = null;
 let firebaseReady = false;
@@ -32,7 +33,6 @@ let playbackTelemetryTimer = null;
 let displayVisualizerFrame = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
-let idleCommercialActive = false;
 let displayVideoError = false;
 let transitionAmbientAudio = null;
 let commercialAudio = null;
@@ -281,22 +281,12 @@ function refreshMarquees(root = document) {
     marquee.classList.toggle('is-overflowing', distance > 4);
   });
 }
-function stopIdleCommercialLoop() {
-  idleCommercialActive = false;
+function stopAnnouncementAudio() {
   window.speechSynthesis?.cancel();
   stopCommercialAudio();
 }
-function startIdleCommercialLoop() {
-  if (idleCommercialActive || state.nowPlaying) return;
-  idleCommercialActive = true;
-  const play = () => {
-    if (!idleCommercialActive || state.nowPlaying) return;
-    playCommercialAudio(() => setTimeout(play, 350));
-  };
-  play();
-}
 function speakDisplayTransition(current) {
-  stopIdleCommercialLoop();
+  stopAnnouncementAudio();
   window.speechSynthesis?.cancel();
   const phrases = [
     { text: `Mesa ${current.tableNumber}.`, pauseAfter: 180 },
@@ -339,7 +329,7 @@ function showDisplayVideoError() {
   stopDisplayVisualizer();
   window.speechSynthesis?.cancel();
   stopTransitionAmbientAudio();
-  stopIdleCommercialLoop();
+  stopAnnouncementAudio();
   postYoutubeCommand('pauseVideo');
   const transition = document.querySelector('#display-transition');
   if (transition) transition.hidden = true;
@@ -396,7 +386,7 @@ function finishDisplayTransition() {
 }
 function beginDisplayTransition(current) {
   displayTransitionActive = true;
-  stopIdleCommercialLoop();
+  stopAnnouncementAudio();
   postYoutubeCommand('pauseVideo');
   const overlay = document.querySelector('#display-transition');
   if (overlay) {
@@ -674,24 +664,42 @@ function roomAccessView() {
 function waiterView() {
   return `<div class="shell">${nav('waiter')}<main class="page waiter-page"><section class="waiter-search-hero"><div class="eyebrow">MESA DE OPERACIÓN</div><h1>Encuentra tu canción</h1><p>Busca una versión de karaoke y agrégala al turno de la mesa.</p><div class="search waiter-search"><label class="sr-only" for="search-input">Artista o canción</label><input id="search-input" class="input" value="${escapeHtml(searchState.query)}" placeholder="Artista o canción…" autocomplete="off"/><button id="search-button" class="button">${icon('search')}<span>Buscar</span></button></div><div id="search-error" role="status" aria-live="polite"></div></section><div class="waiter-summary"><span class="badge">${icon('queue_music')}${state.queue.length} en cola</span><span class="muted">Resultados de YouTube</span></div><section id="results" class="results"></section><div id="selection"></div></main></div>`;
 }
+function youtubeSearchItemToSong(item, isPriority = false) {
+  const snippet = item.snippet ?? {};
+  const videoId = typeof item.id === 'string' ? item.id : item.id?.videoId;
+  return {
+    id: videoId,
+    title: snippet.title ?? 'Video sin título',
+    description: snippet.description ?? '',
+    channelTitle: snippet.channelTitle ?? '',
+    thumbnail: snippet.thumbnails?.medium?.url ?? snippet.thumbnails?.default?.url ?? '',
+    isPriority,
+  };
+}
+function loadResultsPage({ pageToken = '', pageNumber = 1 } = {}) {
+  return searchState.mode === 'recommendations'
+    ? loadRecommendedVideos({ pageToken, pageNumber })
+    : searchYoutube({ pageToken, pageNumber });
+}
 function renderResults(results) {
   const node = document.querySelector('#results');
   if (!node) return;
   if (!results.length) {
-    node.innerHTML = searchState.query ? '<div class="empty">No encontramos resultados para esta búsqueda.</div>' : '';
+    node.innerHTML = searchState.mode === 'recommendations' ? '<div class="empty">Cargando recomendados de Karaoke Entre Panas…</div>' : searchState.query ? '<div class="empty">No encontramos resultados para esta búsqueda.</div>' : '';
     return;
   }
   const firstResult = ((searchState.page - 1) * searchState.pageSize) + 1;
   const lastResult = firstResult + results.length - 1;
   const total = searchState.totalResults ? ` de ${searchState.totalResults.toLocaleString('es-PE')}` : '';
-  node.innerHTML = `<div class="results-toolbar"><div><strong>${firstResult}–${lastResult}${total}</strong><span class="muted"> · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info">${song.isPriority ? `<span class="priority-channel">${icon('star')}RECOMENDADO · ${escapeHtml(PRIORITY_CHANNEL_NAME)}</span>` : ''}<div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
+  const resultsLabel = searchState.mode === 'recommendations' ? `Recomendados · ${PRIORITY_CHANNEL_NAME}` : 'Resultados de búsqueda';
+  node.innerHTML = `<div class="results-toolbar"><div><strong>${escapeHtml(resultsLabel)}</strong><span class="muted"> · ${firstResult}–${lastResult}${total} · Página ${searchState.page}</span></div><label class="page-size">Mostrar <select id="page-size"><option value="10" ${searchState.pageSize === 10 ? 'selected' : ''}>10</option><option value="20" ${searchState.pageSize === 20 ? 'selected' : ''}>20</option><option value="50" ${searchState.pageSize === 50 ? 'selected' : ''}>50</option></select></label></div><div class="results-grid">${results.map((song) => `<article class="song card"><img src="${escapeHtml(song.thumbnail)}" alt="" loading="lazy"/><div class="song-info">${song.isPriority ? `<span class="priority-channel">${icon('star')}RECOMENDADO · ${escapeHtml(PRIORITY_CHANNEL_NAME)}</span>` : ''}<div class="song-title">${escapeHtml(song.title)}</div><div class="song-channel">${escapeHtml(song.channelTitle)}</div><button class="button secondary choose-song" data-song="${escapeHtml(JSON.stringify(song))}">${icon('playlist_add')}Elegir</button></div></article>`).join('')}</div><div class="results-pagination"><button id="previous-page" class="button secondary" ${searchState.prevPageToken ? '' : 'disabled'}>${icon('chevron_left')}Anterior</button><span class="muted">Página ${searchState.page}</span><button id="next-page" class="button secondary" ${searchState.nextPageToken ? '' : 'disabled'}>Siguiente${icon('chevron_right')}</button></div>`;
   node.querySelectorAll('.choose-song').forEach((button) => button.addEventListener('click', () => openSongModal(JSON.parse(button.dataset.song))));
   node.querySelector('#page-size')?.addEventListener('change', (event) => {
     searchState.pageSize = Number(event.target.value);
-    searchYoutube({ pageToken: '', pageNumber: 1 });
+    loadResultsPage({ pageToken: '', pageNumber: 1 });
   });
-  node.querySelector('#previous-page')?.addEventListener('click', () => searchYoutube({ pageToken: searchState.prevPageToken, pageNumber: Math.max(1, searchState.page - 1) }));
-  node.querySelector('#next-page')?.addEventListener('click', () => searchYoutube({ pageToken: searchState.nextPageToken, pageNumber: searchState.page + 1 }));
+  node.querySelector('#previous-page')?.addEventListener('click', () => loadResultsPage({ pageToken: searchState.prevPageToken, pageNumber: Math.max(1, searchState.page - 1) }));
+  node.querySelector('#next-page')?.addEventListener('click', () => loadResultsPage({ pageToken: searchState.nextPageToken, pageNumber: searchState.page + 1 }));
 }
 function formatIsoDuration(value) {
   const match = String(value ?? '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
@@ -765,16 +773,47 @@ function renderSelection() {
     notify('Canción agregada a la cola.');
   });
 }
+async function resolvePriorityChannelId() {
+  const data = await youtubeRequest('search', { part: 'snippet', type: 'channel', maxResults: '5', q: PRIORITY_CHANNEL_NAME, key: YOUTUBE_API_KEY });
+  const priority = normalizeChannelName(PRIORITY_CHANNEL_NAME);
+  const channel = (data.items || []).find((item) => normalizeChannelName(item.snippet?.channelTitle || item.snippet?.title).includes(priority)) || data.items?.[0];
+  const channelId = channel?.id?.channelId;
+  if (!channelId) throw new Error(`No se encontró el canal ${PRIORITY_CHANNEL_NAME}.`);
+  return channelId;
+}
+async function loadRecommendedVideos({ pageToken = '', pageNumber = 1 } = {}) {
+  if (recommendationsLoading) return;
+  recommendationsLoading = true;
+  const error = document.querySelector('#search-error');
+  if (error) error.innerHTML = '';
+  try {
+    const channelId = searchState.channelId || await resolvePriorityChannelId();
+    if (searchState.mode === 'search' && searchState.query) return;
+    const params = { part: 'snippet', channelId, type: 'video', order: 'date', maxResults: String(searchState.pageSize), videoEmbeddable: 'true', videoSyndicated: 'true', key: YOUTUBE_API_KEY };
+    if (pageToken) params.pageToken = pageToken;
+    const data = await youtubeRequest('search', params);
+    if (searchState.mode === 'search' && searchState.query) return;
+    const results = (data.items || []).map((item) => youtubeSearchItemToSong(item, true)).filter((song) => song.id);
+    searchState = { ...searchState, mode: 'recommendations', channelId, query: '', page: pageNumber, nextPageToken: data.nextPageToken || null, prevPageToken: data.prevPageToken || null, totalResults: data.pageInfo?.totalResults || 0, results };
+    renderResults(results);
+  } catch (err) {
+    const node = document.querySelector('#results');
+    if (node) node.innerHTML = `<div class="empty">No pudimos cargar los recomendados de ${escapeHtml(PRIORITY_CHANNEL_NAME)}.</div>`;
+    if (error) error.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    recommendationsLoading = false;
+  }
+}
 async function searchYoutube({ pageToken = '', pageNumber = 1 } = {}) {
   const input = document.querySelector('#search-input'); const button = document.querySelector('#search-button'); const error = document.querySelector('#search-error');
   const query = input.value.trim() || searchState.query; if (!query) return notify('Escribe una canción o artista.');
-  searchState = { ...searchState, query, page: pageNumber };
+  searchState = { ...searchState, query, mode: 'search', page: pageNumber, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
   button.disabled = true; button.textContent = 'Buscando…'; error.innerHTML = '';
   try {
     const params = new URLSearchParams({ part:'snippet', type:'video', maxResults:String(searchState.pageSize), videoEmbeddable:'true', videoSyndicated:'true', q:`${query} karaoke`, key:YOUTUBE_API_KEY });
     if (pageToken) params.set('pageToken', pageToken);
     const data = await youtubeRequest('search', params);
-    const results = prioritizeSearchResults((data.items || []).map((item) => ({ id:item.id.videoId, title:item.snippet.title, description:item.snippet.description, channelTitle:item.snippet.channelTitle, thumbnail:item.snippet.thumbnails.medium.url, isPriority: normalizeChannelName(item.snippet.channelTitle).includes(normalizeChannelName(PRIORITY_CHANNEL_NAME)) })));
+    const results = prioritizeSearchResults((data.items || []).map((item) => youtubeSearchItemToSong(item, normalizeChannelName(item.snippet?.channelTitle).includes(normalizeChannelName(PRIORITY_CHANNEL_NAME)))).filter((song) => song.id));
     searchState = { ...searchState, nextPageToken: data.nextPageToken || null, prevPageToken: data.prevPageToken || null, totalResults: data.pageInfo?.totalResults || 0, results };
     renderResults(results);
   } catch (err) { error.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`; }
@@ -916,10 +955,13 @@ function displayQueueMarkup() {
 function displayVisualizerMarkup() {
   return `<div id="display-edge-visualizer" class="display-edge-visualizer" aria-hidden="true"><span class="edge-ribbon edge-ribbon-top"></span><span class="edge-ribbon edge-ribbon-right"></span><span class="edge-ribbon edge-ribbon-bottom"></span><span class="edge-ribbon edge-ribbon-left"></span><span class="edge-corner edge-corner-tl"></span><span class="edge-corner edge-corner-tr"></span><span class="edge-corner edge-corner-br"></span><span class="edge-corner edge-corner-bl"></span></div>`;
 }
+function displayIdleLightingMarkup() {
+  return Array.from({ length: 8 }, (_, index) => `<span class="idle-light idle-light-${index + 1}"></span>`).join('');
+}
 function displayView(transition = false) {
   const current = state.nowPlaying;
   const videoId = current?.youtubeVideoId ?? '';
-  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 class="display-table" data-display-table>MESA ${escapeHtml(current.tableNumber)}</h1><div class="display-song text-marquee"><span data-display-song data-marquee-content>${escapeHtml(current.songTitle)}</span></div><div class="display-singer-label">CANTA</div><div class="display-singer" data-display-singer>${escapeHtml(current.singerName)}</div></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : '<section class="idle"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></section>'}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="transition-record"><div class="record-disc"><span>MUXO</span></div><div class="transition-copy"><div class="eyebrow">${icon('mic_external_on')} PRÓXIMA VOZ</div><h2 class="transition-table" data-transition-table>${current ? `MESA ${escapeHtml(current.tableNumber)}` : ''}</h2><div class="transition-marquee text-marquee"><p data-transition-song data-marquee-content>${escapeHtml(current?.songTitle ?? '')}</p></div><div class="transition-singer-label">CANTA</div><div class="transition-singer" data-transition-singer>${escapeHtml(current?.singerName ?? '')}</div></div></div><div class="transition-side"><div class="transition-brand">${logoMarkup('transition-logo')}</div><p>El escenario es tuyo.</p></div></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo">${logoMarkup('error-logo')}</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
+  return `<div class="display" data-video-id="${escapeHtml(videoId)}">${nav('display',true)}<main class="display-main">${current ? `<section class="display-hero display-stage"><div class="video display-video-frame"><iframe id="display-video" src="${youtubeUrl(current.youtubeVideoId, transition ? 0 : 1)}" title="Video karaoke actual" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div><div class="display-copy display-overlay"><div class="eyebrow">${icon('mic_external_on')} AHORA CANTA</div><h1 class="display-table" data-display-table>MESA ${escapeHtml(current.tableNumber)}</h1><div class="display-song text-marquee"><span data-display-song data-marquee-content>${escapeHtml(current.songTitle)}</span></div><div class="display-singer-label">CANTA</div><div class="display-singer" data-display-singer>${escapeHtml(current.singerName)}</div></div><section class="up-next display-next-card"><div class="up-next-head"><div><div class="eyebrow">${icon('queue_music')} A CONTINUACIÓN</div><h2>Próximas voces</h2></div><span class="muted" data-display-count>${state.queue.length} turnos</span></div><div class="display-queue" data-display-queue>${displayQueueMarkup()}</div></section></section>` : `<section class="idle idle-stage"><div class="idle-stage-lights" aria-hidden="true">${displayIdleLightingMarkup()}</div><div class="idle-copy"><div class="eyebrow">✦ MUXO KARAOKE</div><h1>El escenario es tuyo</h1><p>La próxima voz aparecerá aquí.</p></div></section>`}</main>${displayVisualizerMarkup()}<div id="display-transition" class="display-transition" hidden><div class="transition-card"><div class="transition-record"><div class="record-disc"><span>MUXO</span></div><div class="transition-copy"><div class="eyebrow">${icon('mic_external_on')} PRÓXIMA VOZ</div><h2 class="transition-table" data-transition-table>${current ? `MESA ${escapeHtml(current.tableNumber)}` : ''}</h2><div class="transition-marquee text-marquee"><p data-transition-song data-marquee-content>${escapeHtml(current?.songTitle ?? '')}</p></div><div class="transition-singer-label">CANTA</div><div class="transition-singer" data-transition-singer>${escapeHtml(current?.singerName ?? '')}</div></div></div><div class="transition-side"><div class="transition-brand">${logoMarkup('transition-logo')}</div><p>El escenario es tuyo.</p></div></div></div><div id="display-video-error" class="display-video-error" hidden><div class="display-video-error-card"><div class="display-error-logo">${logoMarkup('error-logo')}</div><p>Espere por favor, estamos seleccionando tu canción.</p></div></div><div id="audio-activation" class="audio-activation" hidden><div class="audio-activation-card"><div class="eyebrow">${icon('volume_up')} AUDIO DEL SHOW</div><h2>Activa el audio de Muxo</h2><p>El navegador bloqueó el inicio automático del sonido. Se habilita una sola vez para esta pantalla.</p><button id="activate-audio" class="button">${icon('play_arrow')} Activar audio</button></div></div></div>`;
 }
 function updateDisplayInPlace() {
   const display = document.querySelector('.display');
@@ -977,11 +1019,10 @@ function render() {
   if (!activeRoomId) {
     stopPlaybackTelemetry();
     stopDisplayVisualizer();
-    stopCommercialAudio();
+    stopAnnouncementAudio();
     stopTransitionAmbientAudio();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
-    idleCommercialActive = false;
     displayTransitionActive = false;
     app.innerHTML = roomAccessView();
     bindRoomAccess();
@@ -991,16 +1032,14 @@ function render() {
   if (currentRoute !== 'display') {
     stopPlaybackTelemetry();
     stopDisplayVisualizer();
-    stopCommercialAudio();
+    stopAnnouncementAudio();
     stopTransitionAmbientAudio();
     clearTimeout(displayTransitionTimer);
     window.speechSynthesis?.cancel();
-    idleCommercialActive = false;
     displayTransitionActive = false;
   }
   if (currentRoute === 'display' && updateDisplayInPlace()) {
-    if (state.nowPlaying) stopIdleCommercialLoop();
-    else startIdleCommercialLoop();
+    if (state.nowPlaying) stopAnnouncementAudio();
     attachDisplayPlayer();
     applyPlaybackCommand(playbackState().command);
     return;
@@ -1009,17 +1048,19 @@ function render() {
   const previousVideoId = previousDisplay?.dataset.videoId ?? '';
   const nextVideoId = state.nowPlaying?.youtubeVideoId ?? '';
   const transition = currentRoute === 'display' && Boolean(previousDisplay && nextVideoId && previousVideoId !== nextVideoId);
+  if (currentRoute === 'display' && !state.nowPlaying) stopAnnouncementAudio();
   app.innerHTML = currentRoute === 'operator' ? operatorView() : currentRoute === 'display' ? displayView(transition) : waiterView();
   if (currentRoute === 'waiter') {
     document.querySelector('#search-button')?.addEventListener('click', searchYoutube);
     document.querySelector('#search-input')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchYoutube(); });
     renderSelection();
     restoreWaiterFormState(waiterFormState);
+    renderResults(searchState.results);
+    if (!searchState.results.length && !searchState.query) loadRecommendedVideos();
   }
   if (currentRoute === 'operator') bindOperator();
   if (currentRoute === 'display') {
-    if (state.nowPlaying) stopIdleCommercialLoop();
-    else startIdleCommercialLoop();
+    if (state.nowPlaying) stopAnnouncementAudio();
     refreshMarquees(document.querySelector('.display'));
     attachDisplayPlayer({ transition });
     if (!transition) applyPlaybackCommand(playbackState().command);
