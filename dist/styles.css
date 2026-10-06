@@ -207,21 +207,32 @@ a { color: inherit; text-decoration: none; }
 .idle { display: grid; place-content: center; height: 100%; text-align: center; }
 .idle h1 { margin: 20px 0; font-size: clamp(44px, 8vw, 100px); letter-spacing: -.08em; }
 .idle p { color: var(--muted); font-size: 18px; }
-.idle-stage { position: relative; isolation: isolate; overflow: hidden; background: radial-gradient(circle at 50% 42%, #291734 0, #0a080e 54%, #050307 100%); }
-.idle-stage::before { position: absolute; inset: 0; z-index: -2; background: linear-gradient(180deg, #08060d 0, transparent 24%, transparent 78%, #030205 100%), repeating-linear-gradient(90deg, #ffffff03 0 1px, transparent 1px 9vw); content: ''; opacity: .7; }
-.idle-stage::after { position: absolute; inset: 10% 7%; z-index: -1; border: 1px solid #ffffff08; border-radius: 50% 50% 0 0; box-shadow: inset 0 0 100px #0008, 0 0 0 1px #c9f52b05; content: ''; pointer-events: none; }
-.idle-stage-lights { position: absolute; inset: -10%; z-index: -1; overflow: hidden; pointer-events: none; }
-.idle-light { position: absolute; width: clamp(150px, 18vw, 330px); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, #fffbd1 0, #e7fb8d 7%, #c9f52b80 18%, #c9f52b2b 38%, transparent 72%); filter: blur(2px); opacity: .45; mix-blend-mode: screen; animation: idle-light-drift var(--idle-light-duration, 16s) ease-in-out var(--idle-light-delay, 0s) infinite alternate; }
-.idle-light-1 { top: -8%; left: 4%; --idle-light-duration: 18s; --idle-light-delay: -4s; }
-.idle-light-2 { top: 18%; left: 29%; --idle-light-duration: 21s; --idle-light-delay: -13s; transform: scale(.72); }
-.idle-light-3 { top: -14%; right: 4%; --idle-light-duration: 17s; --idle-light-delay: -8s; transform: scale(.86); }
-.idle-light-4 { top: 38%; right: 23%; --idle-light-duration: 23s; --idle-light-delay: -17s; transform: scale(.62); }
-.idle-light-5 { bottom: -20%; left: 18%; --idle-light-duration: 20s; --idle-light-delay: -10s; transform: scale(.92); }
-.idle-light-6 { bottom: -13%; right: 2%; --idle-light-duration: 19s; --idle-light-delay: -2s; transform: scale(.68); }
-.idle-light-7 { top: 47%; left: -9%; --idle-light-duration: 24s; --idle-light-delay: -19s; transform: scale(.58); }
-.idle-light-8 { top: 6%; left: 62%; --idle-light-duration: 22s; --idle-light-delay: -6s; transform: scale(.5); }
+.idle-stage { position: relative; isolation: isolate; overflow: hidden; background: #07050b; }
+.idle-stage::before { position: absolute; inset: 0; z-index: -2; background: linear-gradient(180deg, #06050a 0, transparent 22%, transparent 72%, #020204 100%), repeating-linear-gradient(90deg, #ffffff03 0 1px, transparent 1px 9vw); content: ''; opacity: .72; }
+.idle-stage::after { position: absolute; inset: 10% 7%; z-index: 1; border: 1px solid #ffffff08; border-radius: 50% 50% 0 0; box-shadow: inset 0 0 100px #0008, 0 0 0 1px #c9f52b05; content: ''; pointer-events: none; }
+.idle-stage-atmosphere { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: radial-gradient(ellipse at 50% 54%, #24142d 0, #0c0811 47%, #050307 100%); pointer-events: none; }
+.idle-stage-wall { position: absolute; inset: -20%; background: radial-gradient(ellipse at 50% 48%, #49214e70 0, #1a10277a 31%, transparent 66%), linear-gradient(180deg, #151023 0, #08060d 78%); filter: blur(12px); animation: idle-wall-breathe 13s ease-in-out infinite alternate; }
+.idle-stage-wall::after { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 110%, #c9f52b15 0, transparent 44%), radial-gradient(ellipse at 50% 0, #ffffff08 0, transparent 33%); content: ''; }
+.idle-light-field { position: absolute; inset: -12%; overflow: hidden; }
+.idle-light { position: absolute; width: clamp(190px, 27vw, 500px); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, #fffbd9 0, #f1f7a0 6%, #d6ef6b80 15%, #c9f52b36 34%, #c9f52b0d 54%, transparent 73%); filter: blur(5px); opacity: .44; mix-blend-mode: screen; animation: idle-light-drift var(--idle-light-duration, 18s) ease-in-out var(--idle-light-delay, 0s) infinite alternate; }
+.idle-light-1 { top: -18%; left: -2%; --idle-light-duration: 19s; --idle-light-delay: -4s; --idle-x-start: -2vw; --idle-y-start: 5vh; --idle-x-end: 12vw; --idle-y-end: -4vh; --idle-scale-start: .72; --idle-scale-end: 1.04; }
+.idle-light-2 { top: 8%; left: 24%; --idle-light-duration: 23s; --idle-light-delay: -13s; --idle-x-start: 4vw; --idle-y-start: -2vh; --idle-x-end: -7vw; --idle-y-end: 9vh; --idle-scale-start: .62; --idle-scale-end: .92; }
+.idle-light-3 { top: -22%; right: -2%; --idle-light-duration: 18s; --idle-light-delay: -8s; --idle-x-start: 4vw; --idle-y-start: 8vh; --idle-x-end: -10vw; --idle-y-end: -3vh; --idle-scale-start: .9; --idle-scale-end: .66; }
+.idle-light-4 { top: 35%; right: 15%; --idle-light-duration: 26s; --idle-light-delay: -17s; --idle-x-start: 8vw; --idle-y-start: -4vh; --idle-x-end: -4vw; --idle-y-end: 7vh; --idle-scale-start: .56; --idle-scale-end: .84; }
+.idle-light-5 { bottom: -26%; left: 11%; --idle-light-duration: 21s; --idle-light-delay: -10s; --idle-x-start: -6vw; --idle-y-start: -3vh; --idle-x-end: 9vw; --idle-y-end: -11vh; --idle-scale-start: .9; --idle-scale-end: .68; }
+.idle-light-6 { bottom: -19%; right: -4%; --idle-light-duration: 20s; --idle-light-delay: -2s; --idle-x-start: 7vw; --idle-y-start: -5vh; --idle-x-end: -9vw; --idle-y-end: 4vh; --idle-scale-start: .66; --idle-scale-end: .94; }
+.idle-light-7 { top: 43%; left: -13%; --idle-light-duration: 25s; --idle-light-delay: -19s; --idle-x-start: -3vw; --idle-y-start: 6vh; --idle-x-end: 12vw; --idle-y-end: -5vh; --idle-scale-start: .55; --idle-scale-end: .76; }
+.idle-light-8 { top: 1%; left: 58%; --idle-light-duration: 22s; --idle-light-delay: -6s; --idle-x-start: -5vw; --idle-y-start: -2vh; --idle-x-end: 6vw; --idle-y-end: 10vh; --idle-scale-start: .48; --idle-scale-end: .7; }
+.idle-beam { position: absolute; top: -24%; width: clamp(180px, 18vw, 360px); height: 150%; transform-origin: 50% 0; background: linear-gradient(180deg, #f5ffb40d 0, #c9f52b18 28%, transparent 68%); filter: blur(16px); opacity: .52; mix-blend-mode: screen; animation: idle-beam-sweep 17s ease-in-out infinite alternate; }
+.idle-beam-1 { left: 14%; transform: rotate(20deg); animation-delay: -6s; }
+.idle-beam-2 { left: 46%; transform: rotate(-8deg); animation-duration: 21s; animation-delay: -13s; opacity: .34; }
+.idle-beam-3 { right: 6%; transform: rotate(-24deg); animation-duration: 19s; animation-delay: -3s; opacity: .4; }
+.idle-stage-floor { position: absolute; right: -10%; bottom: -25%; left: -10%; height: 45%; border-top: 1px solid #ffffff0d; background: radial-gradient(ellipse at 50% 0, #c9f52b18 0, transparent 52%), linear-gradient(180deg, #100b17 0, #030205 75%); transform: perspective(420px) rotateX(58deg); transform-origin: 50% 0; box-shadow: 0 -12px 45px #c9f52b0c; }
 .idle-copy { position: relative; z-index: 1; padding: 24px; text-shadow: 0 3px 30px #000; }
-@keyframes idle-light-drift { 0% { opacity: .18; transform: translate3d(-7vw, 4vh, 0) scale(.72); } 50% { opacity: .58; } 100% { opacity: .28; transform: translate3d(8vw, -5vh, 0) scale(1.08); } }
+@keyframes idle-wall-breathe { from { transform: scale(1); opacity: .75; } to { transform: scale(1.08); opacity: 1; } }
+@keyframes idle-light-drift { 0% { opacity: .16; transform: translate3d(var(--idle-x-start), var(--idle-y-start), 0) scale(var(--idle-scale-start)); } 50% { opacity: .58; } 100% { opacity: .26; transform: translate3d(var(--idle-x-end), var(--idle-y-end), 0) scale(var(--idle-scale-end)); } }
+@keyframes idle-beam-sweep { from { translate: -4vw 0; rotate: -4deg; opacity: .22; } to { translate: 6vw 0; rotate: 5deg; opacity: .58; } }
+@media (prefers-reduced-motion: reduce) { .idle-stage-wall, .idle-light, .idle-beam { animation: none; } }
 .display-transition { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 40%, #32183dd9 0, #050307f5 62%), #050307f5; }
 .display-transition[hidden] { display: none; }
 .display-video-error { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 42%, #32183df2 0, #050307f8 64%), #050307f8; }
