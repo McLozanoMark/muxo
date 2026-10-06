@@ -157,7 +157,7 @@ a { color: inherit; text-decoration: none; }
 .display-stage { position: relative; width: 100%; height: 100%; }
 .display-stage::after { position: absolute; inset: 0; z-index: 1; display: block; background: linear-gradient(90deg, #030304b8 0, transparent 43%), linear-gradient(0deg, #030304e6 0, transparent 34%); content: ''; pointer-events: none; }
 .display-video-frame { position: absolute; inset: 0; z-index: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: #000; box-shadow: none; }
-.display-video-frame iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
+.display-video-frame iframe { width: 100%; height: 100%; border: 0; pointer-events: auto; }
 .display-edge-visualizer { --visualizer-glow: .35; --visualizer-scale: .9; --visualizer-drift: 0px; position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .12; mix-blend-mode: screen; transition: opacity .7s ease; }
 .display-edge-visualizer.is-playing { opacity: .82; }
 .edge-ribbon { position: absolute; display: block; pointer-events: none; opacity: calc(.36 + var(--visualizer-glow) * .5); filter: blur(9px); animation: edge-breathe 3.8s ease-in-out infinite; }
