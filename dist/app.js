@@ -1,5 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-import { getFirestore, doc, getDoc, onSnapshot, updateDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
+import { getFirestore, doc, getDoc, onSnapshot, updateDoc, runTransaction, collection, getDocs, query, where, limit, setDoc } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
 
 const YOUTUBE_API_KEY = 'AIzaSyDs31A8sNQqSVESILNKv93qWLxEAq-33E4';
 const FIREBASE_CONFIG = { apiKey: 'AIzaSyBwySV_jaJoQcow6u494XH7WkFmMY3eyG0', authDomain: 'muxo-karaoke.firebaseapp.com', projectId: 'muxo-karaoke', storageBucket: 'muxo-karaoke.firebasestorage.app', messagingSenderId: '290765040154', appId: '1:290765040154:web:eb204766dcdc3c58437fa3' };
@@ -29,8 +30,10 @@ let recommendationsLoading = false;
 let saveTimer = null;
 const singerMemorySaveTimers = new Map();
 let firebaseDb = null;
+let firebaseAuth = null;
 let firebaseReady = false;
 let sessionUnsubscribe = null;
+let authUnsubscribe = null;
 let activeRoomId = null;
 let displayIframe = null;
 let displayPlayer = null;
@@ -50,8 +53,20 @@ let commercialPlaybackId = 0;
 let selectionKeydownHandler = null;
 let operatorLeaseTimer = null;
 let operatorLockError = '';
+let adminAuthState = 'unknown';
+let adminUser = null;
+let adminError = '';
+let adminCaptcha = null;
+let adminMetrics = null;
+let adminMetricsLoading = false;
+let adminMetricsKey = '';
+let adminRangeFrom = '';
+let adminRangeTo = '';
+let analyticsVisit = null;
+let analyticsHeartbeatTimer = null;
 const localKey = 'muxo-pages-session';
 const deviceModeKey = 'muxo-device-mode';
+const analyticsCollectionName = 'muxoAnalytics';
 
 function escapeHtml(value) {
   const normalized = String(value ?? '')
@@ -195,12 +210,13 @@ function clientDeviceId() {
   localStorage.setItem('muxo-client-id', value);
   return value;
 }
-function currentRole() { return ['waiter', 'operator', 'display'].includes(route()) ? route() : 'waiter'; }
+function currentRole() { return ['waiter', 'operator', 'display', 'admin'].includes(route()) ? route() : 'waiter'; }
 function updateDocumentTitle() {
+  if (route() === 'admin') { document.title = 'Muxo Admin · Analytics'; return; }
   const songTitle = String(state.nowPlaying?.songTitle ?? '').trim();
   document.title = songTitle ? `${songTitle} · Muxo` : 'Muxo Karaoke';
 }
-function roleLabel(role = currentRole()) { return role === 'operator' ? 'encargado' : role === 'display' ? 'pantalla TV' : 'mesero'; }
+function roleLabel(role = currentRole()) { return role === 'operator' ? 'encargado' : role === 'display' ? 'pantalla TV' : role === 'admin' ? 'administrador' : 'mesero'; }
 function id() { return crypto.randomUUID?.() || `muxo-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function notify(message) { const node = document.createElement('div'); node.className = 'toast'; node.textContent = message; document.body.append(node); setTimeout(() => node.remove(), 2600); }
 function youtubeUrl(videoId, autoplay = 1) { return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=${autoplay}&playsinline=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&widget_referrer=${encodeURIComponent(location.href)}`; }
@@ -210,6 +226,119 @@ function playbackLabel() { return playbackState().command?.action === 'pause' ? 
 function formatTime(seconds) { const safe = Math.max(0, Math.floor(Number(seconds) || 0)); return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, '0')}`; }
 function roomDocument() { return doc(firebaseDb, 'sessions', 'muxo-main'); }
 function sessionDocument() { return roomDocument(); }
+function adminTodayIso() {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+function adminDateRange() {
+  const fallback = adminTodayIso();
+  const from = document.querySelector('#admin-from')?.value || fallback;
+  const to = document.querySelector('#admin-to')?.value || from;
+  const start = new Date(`${from}T00:00:00-05:00`).getTime();
+  const end = new Date(`${to}T23:59:59.999-05:00`).getTime();
+  return { from, to, start: Math.min(start, end), end: Math.max(start, end) };
+}
+function createAdminCaptcha() {
+  const left = Math.floor(Math.random() * 8) + 2;
+  const right = Math.floor(Math.random() * 8) + 1;
+  adminCaptcha = { prompt: `${left} + ${right}`, answer: String(left + right) };
+}
+async function recordAnalyticsEvent(eventType, payload = {}) {
+  if (!firebaseDb || !activeRoomId) return;
+  try {
+    const eventRef = doc(collection(firebaseDb, analyticsCollectionName));
+    await setDoc(eventRef, { eventType, roomId: activeRoomId, clientDeviceId: clientDeviceId(), createdAt: Date.now(), ...payload });
+  } catch (error) {
+    console.warn('No se pudo registrar analítica de Muxo.', error);
+  }
+}
+function stopAnalyticsVisit() {
+  clearInterval(analyticsHeartbeatTimer);
+  analyticsHeartbeatTimer = null;
+  if (!analyticsVisit) return;
+  const visit = analyticsVisit;
+  analyticsVisit = null;
+  void recordAnalyticsEvent('visit_end', { sessionId: visit.sessionId, role: visit.role, startedAt: visit.startedAt, durationMs: Date.now() - visit.startedAt });
+}
+function startAnalyticsVisit() {
+  stopAnalyticsVisit();
+  if (!firebaseReady || !activeRoomId || currentRole() === 'admin') return;
+  const visit = { sessionId: id(), role: currentRole(), startedAt: Date.now() };
+  analyticsVisit = visit;
+  void recordAnalyticsEvent('visit_start', { sessionId: visit.sessionId, role: visit.role, startedAt: visit.startedAt });
+  analyticsHeartbeatTimer = setInterval(() => {
+    if (!analyticsVisit) return;
+    void recordAnalyticsEvent('visit_heartbeat', { sessionId: visit.sessionId, role: visit.role, startedAt: visit.startedAt, durationMs: Date.now() - visit.startedAt });
+  }, 20000);
+}
+function adminAggregate(events) {
+  const visits = new Map();
+  const rooms = new Map();
+  const songs = new Map();
+  const singers = new Map();
+  const tables = new Map();
+  events.forEach((event) => {
+    const room = String(event.roomId || '—');
+    if (event.eventType === 'visit_start') {
+      visits.set(event.sessionId, { room, role: event.role || 'unknown', startedAt: Number(event.startedAt) || Number(event.createdAt) || 0, durationMs: 0 });
+      const roomStats = rooms.get(room) || { room, visits: 0, minutes: 0 };
+      roomStats.visits += 1;
+      rooms.set(room, roomStats);
+    }
+    if (['visit_heartbeat', 'visit_end'].includes(event.eventType) && visits.has(event.sessionId)) {
+      visits.get(event.sessionId).durationMs = Math.max(visits.get(event.sessionId).durationMs, Number(event.durationMs) || 0);
+    }
+    if (event.eventType === 'song_played') {
+      const songKey = String(event.youtubeVideoId || event.songTitle || '');
+      const song = songs.get(songKey) || { title: event.songTitle || 'Sin título', channel: event.channelTitle || '—', plays: 0 };
+      song.plays += 1;
+      songs.set(songKey, song);
+      const singerKey = singerNameKey(event.singerName || 'Invitado');
+      const singer = singers.get(singerKey) || { name: event.singerName || 'Invitado', songs: 0, tables: new Set() };
+      singer.songs += 1;
+      if (event.tableNumber) singer.tables.add(String(event.tableNumber));
+      singers.set(singerKey, singer);
+      const tableKey = `${room}-${event.tableNumber || '—'}`;
+      const table = tables.get(tableKey) || { room, table: event.tableNumber || '—', songs: 0 };
+      table.songs += 1;
+      tables.set(tableKey, table);
+    }
+  });
+  visits.forEach((visit) => {
+    const roomStats = rooms.get(visit.room);
+    if (roomStats) roomStats.minutes += visit.durationMs / 60000;
+  });
+  return {
+    totalSessions: visits.size,
+    waiterSessions: [...visits.values()].filter((visit) => visit.role === 'waiter').length,
+    totalMinutes: [...visits.values()].reduce((total, visit) => total + visit.durationMs / 60000, 0),
+    rooms: [...rooms.values()].sort((a, b) => b.visits - a.visits),
+    songs: [...songs.values()].sort((a, b) => b.plays - a.plays),
+    singers: [...singers.values()].map((singer) => ({ ...singer, tables: [...singer.tables].sort() })).sort((a, b) => b.songs - a.songs),
+    tables: [...tables.values()].sort((a, b) => b.songs - a.songs),
+  };
+}
+async function loadAdminMetrics() {
+  if (adminAuthState !== 'authorized' || !firebaseDb || adminMetricsLoading) return;
+  const range = adminDateRange();
+  const key = `${range.from}:${range.to}`;
+  if (adminMetricsKey === key && adminMetrics) return;
+  adminMetricsLoading = true;
+  adminMetricsKey = key;
+  adminError = '';
+  try {
+    const snapshot = await getDocs(query(collection(firebaseDb, analyticsCollectionName), where('createdAt', '>=', range.start), where('createdAt', '<=', range.end), limit(5000)));
+    adminMetrics = adminAggregate(snapshot.docs.map((item) => item.data()));
+  } catch (error) {
+    console.error(error);
+    adminMetrics = null;
+    adminError = 'No se pudieron cargar las métricas. Verifica las reglas de acceso de Firebase.';
+  } finally {
+    adminMetricsLoading = false;
+    if (route() === 'admin') render();
+  }
+}
 function youtubeApiError(response, payload = null) {
   const reason = payload?.error?.errors?.[0]?.reason;
   const message = String(payload?.error?.message ?? '').toLowerCase();
@@ -629,7 +758,36 @@ function sendPlaybackCommand(action, volume = playbackVolume()) {
 
 async function initializeFirebaseServices() {
   if (!firebaseDb) {
-    firebaseDb = getFirestore(initializeApp(FIREBASE_CONFIG));
+    const firebaseApp = initializeApp(FIREBASE_CONFIG);
+    firebaseDb = getFirestore(firebaseApp);
+    firebaseAuth = getAuth(firebaseApp);
+    try { await setPersistence(firebaseAuth, browserLocalPersistence); } catch (error) { console.warn('No se pudo conservar la sesión administrativa.', error); }
+    authUnsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+      adminUser = user;
+      if (!user) {
+        adminAuthState = 'signed_out';
+        adminError = '';
+        if (route() === 'admin') render();
+        return;
+      }
+      adminAuthState = 'checking';
+      if (route() === 'admin') render();
+      try {
+        const token = await user.getIdTokenResult();
+        if (token.claims.admin !== true) {
+          adminAuthState = 'denied';
+          adminError = 'Esta cuenta no tiene permisos de administrador.';
+        } else {
+          adminAuthState = 'authorized';
+          adminError = '';
+        }
+      } catch (error) {
+        console.error(error);
+        adminAuthState = 'denied';
+        adminError = 'No se pudo validar el permiso administrativo.';
+      }
+      if (route() === 'admin') render();
+    });
   }
 }
 async function claimOperatorLock(roomId) {
@@ -710,12 +868,14 @@ function startOperatorLease() {
   operatorLeaseTimer = setInterval(renew, OPERATOR_HEARTBEAT_MS);
 }
 async function startRoomSession(roomId) {
+  stopAnalyticsVisit();
   sessionUnsubscribe?.();
   sessionUnsubscribe = null;
   stopOperatorLease();
   firebaseReady = false;
   state = emptyRoomSession();
   if (!roomId) {
+    try { await initializeFirebaseServices(); } catch (error) { console.error(error); adminAuthState = 'denied'; adminError = 'No se pudo conectar con el servicio de autenticación.'; }
     render();
     return;
   }
@@ -748,6 +908,7 @@ async function startRoomSession(roomId) {
     firebaseReady = true;
     state = roomState;
     localStorage.setItem(localSessionKey(), JSON.stringify(state));
+    startAnalyticsVisit();
     sessionUnsubscribe = onSnapshot(sessionRef, (next) => {
       const nextRoomState = next.data()?.rooms?.[roomId];
       if (roomId !== activeRoomId || !next.exists() || !nextRoomState) return;
@@ -798,6 +959,7 @@ async function createRoom() {
   }
 }
 function leaveRoom() {
+  stopAnalyticsVisit();
   void releaseOperatorLock();
   sessionUnsubscribe?.();
   sessionUnsubscribe = null;
@@ -848,6 +1010,68 @@ function nav(active, display = false) {
   if (display) return `<header class="display-top"><a class="brand" href="${roomHref('display')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>${icon('mic_external_on')} SALA ${escapeHtml(activeRoomId ?? '')} · EN VIVO ${roomStatus() !== 'open' ? `· ${escapeHtml(roomStatusLabel().toUpperCase())}` : ''}</span><span class="muted">${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</span></header>`;
   const operatorLink = canAccessOperator() ? `<a class="${active === 'operator' ? 'active' : ''}" href="${roomHref('operator')}">${icon('queue_music')}<span>Encargado</span><span id="queue-count">${state.queue.length}</span></a>` : '';
   return `<header class="topbar"><a class="brand" href="${roomHref('waiter')}">${logoMarkup('brand-logo')}</a><span class="top-meta"><span class="live-dot"></span>Sala ${escapeHtml(activeRoomId ?? '')} · Firebase ${firebaseReady ? 'activo' : 'local'} ${roomStatusMarkup()}</span><div class="top-actions"><a class="room-switch" href="#${active}">${icon('logout')}<span>Cambiar sala</span></a></div></header><nav class="nav"><a class="${active === 'waiter' ? 'active' : ''}" href="${roomHref('waiter')}">${icon('person')}<span>Mesero</span></a>${operatorLink}</nav>`;
+}
+function adminLogin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = form.querySelector('#admin-email')?.value.trim();
+  const password = form.querySelector('#admin-password')?.value;
+  const captchaAnswer = form.querySelector('#admin-captcha-answer')?.value.trim();
+  if (!adminCaptcha || captchaAnswer !== adminCaptcha.answer) {
+    adminError = 'El CAPTCHA no coincide. Inténtalo nuevamente.';
+    createAdminCaptcha();
+    render();
+    return;
+  }
+  if (!email || !password || !firebaseAuth) return;
+  adminAuthState = 'checking';
+  adminError = '';
+  render();
+  signInWithEmailAndPassword(firebaseAuth, email, password).catch((error) => {
+    console.error(error);
+    adminAuthState = 'signed_out';
+    adminError = error.code === 'auth/invalid-credential' ? 'Correo o contraseña incorrectos.' : 'No se pudo iniciar sesión. Revisa los datos e inténtalo nuevamente.';
+    createAdminCaptcha();
+    render();
+  });
+}
+async function adminLogout() {
+  if (!firebaseAuth) return;
+  await signOut(firebaseAuth);
+  adminMetrics = null;
+  adminMetricsKey = '';
+}
+function adminDashboardView() {
+  const today = adminTodayIso();
+  const from = adminRangeFrom || today;
+  const to = adminRangeTo || today;
+  const metrics = adminMetrics || { totalSessions: 0, waiterSessions: 0, totalMinutes: 0, rooms: [], songs: [], singers: [], tables: [] };
+  const songRows = metrics.songs.slice(0, 8).map((song, index) => `<tr><td><span class="admin-rank">${String(index + 1).padStart(2, '0')}</span></td><td><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.channel)}</span></td><td>${song.plays}</td></tr>`).join('') || '<tr><td colspan="3" class="admin-empty-cell">Todavía no hay canciones reproducidas en este rango.</td></tr>';
+  const singerRows = metrics.singers.slice(0, 8).map((singer) => `<tr><td><strong>${escapeHtml(singer.name)}</strong><span>Mesas ${escapeHtml(singer.tables.join(', ') || '—')}</span></td><td>${singer.songs}</td></tr>`).join('') || '<tr><td colspan="2" class="admin-empty-cell">Todavía no hay cantantes registrados.</td></tr>';
+  const roomRows = metrics.rooms.map((room) => `<tr><td><strong>${escapeHtml(room.room)}</strong></td><td>${room.visits}</td><td>${room.minutes.toFixed(1)} min</td></tr>`).join('') || '<tr><td colspan="3" class="admin-empty-cell">No hay visitas en este rango.</td></tr>';
+  return `<div class="admin-shell"><header class="admin-topbar"><a class="brand" href="${location.pathname}">${logoMarkup('brand-logo')}</a><div class="admin-topbar-meta"><span class="admin-pulse"></span><span>ADMIN ANALYTICS</span><span class="admin-user-email">${escapeHtml(adminUser?.email || '')}</span><button id="admin-logout" class="admin-logout" type="button">${icon('logout')}Salir</button></div></header><main class="admin-page"><div class="admin-heading"><div><div class="eyebrow">MUXO BACKSTAGE</div><h1>La noche, en datos.</h1><p>Una lectura clara de tus salas, tus voces y el ritmo del karaoke.</p></div><div class="admin-heading-mark">${icon('insights')}<span>LIVE OPERATIONS</span></div></div><form id="admin-filter-form" class="admin-filter card"><div><div class="eyebrow">PERIODO</div><strong>Explora la actividad</strong></div><label>Desde<input id="admin-from" type="date" value="${from}"/></label><label>Hasta<input id="admin-to" type="date" value="${to}"/></label><button class="button" type="submit">${icon('refresh')}Actualizar</button></form>${adminError ? `<div class="admin-alert" role="alert">${icon('error')}<span>${escapeHtml(adminError)}</span></div>` : ''}${adminMetricsLoading ? '<div class="admin-loading card">Consultando la actividad de Muxo…</div>' : ''}<section class="admin-kpis"><article class="admin-kpi card"><span class="admin-kpi-icon">${icon('groups')}</span><span class="admin-kpi-label">Sesiones totales</span><strong>${metrics.totalSessions}</strong><small>${metrics.waiterSessions} desde mesero</small></article><article class="admin-kpi card"><span class="admin-kpi-icon">${icon('schedule')}</span><span class="admin-kpi-label">Tiempo en Muxo</span><strong>${metrics.totalMinutes.toFixed(1)} <small>min</small></strong><small>duración acumulada</small></article><article class="admin-kpi card"><span class="admin-kpi-icon">${icon('music_note')}</span><span class="admin-kpi-label">Canciones cantadas</span><strong>${metrics.songs.reduce((total, song) => total + song.plays, 0)}</strong><small>reproducciones iniciadas</small></article><article class="admin-kpi card"><span class="admin-kpi-icon">${icon('meeting_room')}</span><span class="admin-kpi-label">Salas activas</span><strong>${metrics.rooms.length}</strong><small>con actividad registrada</small></article></section><section class="admin-grid"><article class="admin-panel card"><div class="admin-panel-head"><div><div class="eyebrow">RANKING</div><h2>Canciones más cantadas</h2></div>${icon('equalizer')}</div><table class="admin-table"><thead><tr><th>#</th><th>Canción</th><th>Veces</th></tr></thead><tbody>${songRows}</tbody></table></article><article class="admin-panel card"><div class="admin-panel-head"><div><div class="eyebrow">VOCES</div><h2>Cantantes frecuentes</h2></div>${icon('mic')}</div><table class="admin-table"><thead><tr><th>Cantante</th><th>Temas</th></tr></thead><tbody>${singerRows}</tbody></table></article><article class="admin-panel card admin-panel-wide"><div class="admin-panel-head"><div><div class="eyebrow">OPERACIÓN</div><h2>Actividad por sala</h2></div>${icon('meeting_room')}</div><table class="admin-table"><thead><tr><th>Sala</th><th>Sesiones</th><th>Tiempo</th></tr></thead><tbody>${roomRows}</tbody></table></article></section><p class="admin-footnote">Las sesiones se cuentan de forma anónima por dispositivo y sala. El tiempo se actualiza mientras la página permanece abierta.</p></main></div>`;
+}
+function adminView() {
+  if (adminAuthState === 'unknown' || adminAuthState === 'checking') return `<div class="admin-shell admin-auth-shell"><div class="admin-auth-card card"><div class="admin-auth-logo">${logoMarkup('room-logo')}</div><div class="eyebrow">MUXO BACKSTAGE</div><h1>Preparando tu acceso</h1><p>Validando la sesión administrativa…</p><span class="admin-loader">${icon('progress_activity')}</span></div></div>`;
+  if (adminAuthState === 'authorized') return adminDashboardView();
+  if (!adminCaptcha) createAdminCaptcha();
+  const denied = adminAuthState === 'denied';
+  return `<div class="admin-shell admin-auth-shell"><div class="admin-auth-card card"><div class="admin-auth-logo">${logoMarkup('room-logo')}</div><div class="eyebrow">${icon('lock')} ACCESO PRIVADO</div><h1>Controla el backstage.</h1><p>Este espacio está reservado para administrar Muxo y revisar el pulso de tus salas.</p>${denied ? `<div class="admin-alert" role="alert">${icon('block')}<span>${escapeHtml(adminError || 'Acceso denegado.')}</span></div>` : ''}<form id="admin-login-form" class="admin-login-form"><label>Correo administrativo<input id="admin-email" type="email" autocomplete="username" required placeholder="admin@tuempresa.com"/></label><label>Contraseña<input id="admin-password" type="password" autocomplete="current-password" required placeholder="Tu contraseña"/></label><div class="admin-captcha"><div><span>Verificación rápida</span><strong>${escapeHtml(adminCaptcha.prompt)} = ?</strong></div><input id="admin-captcha-answer" inputmode="numeric" autocomplete="off" required aria-label="Respuesta del CAPTCHA" placeholder="Respuesta"/></div><button class="button" type="submit">${icon('login')}Entrar al panel</button></form><a class="admin-back-link" href="${location.pathname}">${icon('arrow_back')}Volver a Muxo</a></div></div>`;
+}
+function bindAdmin() {
+  document.querySelector('#admin-login-form')?.addEventListener('submit', adminLogin);
+  document.querySelector('#admin-logout')?.addEventListener('click', adminLogout);
+  document.querySelector('#admin-filter-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const range = adminDateRange();
+    adminRangeFrom = range.from;
+    adminRangeTo = range.to;
+    adminMetrics = null;
+    adminMetricsKey = '';
+    render();
+    void loadAdminMetrics();
+  });
+  if (adminAuthState === 'authorized' && !adminMetrics && !adminMetricsLoading) void loadAdminMetrics();
 }
 function roomCodeForm() {
   return `<div class="room-access-divider" aria-hidden="true"><span>o escribe el código</span></div><form id="join-room-form" class="room-join-form"><label for="room-code-input">Código de sala</label><div class="room-join-controls"><input id="room-code-input" class="input" maxlength="${ROOM_ID_LENGTH}" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="Ej. D7B3HL" aria-describedby="room-code-hint"/><button class="button" type="submit">${icon('login')}Entrar</button></div><small id="room-code-hint">Usa las ${ROOM_ID_LENGTH} letras o números que aparecen en el enlace de la sala.</small></form>`;
@@ -1091,7 +1315,9 @@ function renderSelection() {
     if (!Number.isInteger(numericTable) || numericTable < 1 || numericTable > MAX_TABLES) return notify(`Selecciona una mesa del 01 al ${String(MAX_TABLES).padStart(2, '0')}.`);
     const singerName = selectedSingerName.trim() || 'Invitado';
     rememberSingerForTable(tableNumber, singerName);
-    save({ ...state, queue: [...state.queue, { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() }] });
+    const request = { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() };
+    save({ ...state, queue: [...state.queue, request] });
+    void recordAnalyticsEvent('request_added', { singerName, tableNumber, songTitle: request.songTitle, youtubeVideoId: request.youtubeVideoId, channelTitle: request.channelTitle });
     closeSongSelection();
     notify('Canción agregada a la cola.');
   });
@@ -1246,6 +1472,7 @@ function bindQueueDragAndDrop() {
   });
 }
 async function advanceQueue(expectedVideoId = null) {
+  let startedRequest = null;
   if (firebaseReady) {
     try {
       await runTransaction(firebaseDb, async (transaction) => {
@@ -1253,6 +1480,7 @@ async function advanceQueue(expectedVideoId = null) {
         const live = snapshot.data()?.rooms?.[activeRoomId] ?? state;
         if (expectedVideoId && live.nowPlaying?.youtubeVideoId !== expectedVideoId) return;
         const [next, ...rest] = live.queue ?? [];
+        startedRequest = next ? { ...next, status: 'playing' } : null;
         const recent = live.nowPlaying ? [{ ...live.nowPlaying, status: 'finished' }, ...(live.recent ?? [])].slice(0, 8) : (live.recent ?? []);
         const volume = Number(live.playback?.volume);
         const safeVolume = Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : 100;
@@ -1266,6 +1494,7 @@ async function advanceQueue(expectedVideoId = null) {
           },
         });
       });
+      if (startedRequest) void recordAnalyticsEvent('song_played', { singerName: startedRequest.singerName, tableNumber: startedRequest.tableNumber, songTitle: startedRequest.songTitle, youtubeVideoId: startedRequest.youtubeVideoId, channelTitle: startedRequest.channelTitle });
       return;
     } catch (error) {
       console.error(error);
@@ -1275,7 +1504,9 @@ async function advanceQueue(expectedVideoId = null) {
   }
   const [next, ...rest] = state.queue;
   if (!next && !state.nowPlaying) return notify('La cola está vacía.');
-  save({ ...state, nowPlaying: next ? { ...next, status: 'playing' } : null, queue: rest, recent: state.nowPlaying ? [{ ...state.nowPlaying, status: 'finished' }, ...state.recent].slice(0, 8) : state.recent, playback: { ...playbackState(), position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: playbackVolume(), createdAt: Date.now() } } });
+  const nextPlaying = next ? { ...next, status: 'playing' } : null;
+  save({ ...state, nowPlaying: nextPlaying, queue: rest, recent: state.nowPlaying ? [{ ...state.nowPlaying, status: 'finished' }, ...state.recent].slice(0, 8) : state.recent, playback: { ...playbackState(), position: 0, duration: 0, videoId: next?.youtubeVideoId ?? null, command: { id: id(), action: next ? 'play' : 'pause', volume: playbackVolume(), createdAt: Date.now() } } });
+  if (nextPlaying) void recordAnalyticsEvent('song_played', { singerName: nextPlaying.singerName, tableNumber: nextPlaying.tableNumber, songTitle: nextPlaying.songTitle, youtubeVideoId: nextPlaying.youtubeVideoId, channelTitle: nextPlaying.channelTitle });
 }
 async function markCurrentAbsent() {
   if (!state.nowPlaying) return;
@@ -1404,6 +1635,18 @@ function bindRoomAccess() {
 function render() {
   updateDocumentTitle();
   const currentRoute = route();
+  if (currentRoute === 'admin') {
+    stopPlaybackTelemetry();
+    stopDisplayVisualizer();
+    stopAnnouncementAudio();
+    stopTransitionAmbientAudio();
+    clearTimeout(displayTransitionTimer);
+    window.speechSynthesis?.cancel();
+    displayTransitionActive = false;
+    app.innerHTML = adminView();
+    bindAdmin();
+    return;
+  }
   if (!activeRoomId) {
     stopPlaybackTelemetry();
     stopDisplayVisualizer();
@@ -1456,14 +1699,17 @@ function render() {
 }
 async function handleRouteChange() {
   if (redirectUnauthorizedOperator()) return;
+  const previousRole = analyticsVisit?.role;
   const nextRoomId = roomIdFromLocation();
   if (nextRoomId !== activeRoomId) {
+    stopAnalyticsVisit();
     const previousRoomId = activeRoomId;
     if (previousRoomId) await releaseOperatorLock(previousRoomId);
     activeRoomId = nextRoomId;
     await startRoomSession(nextRoomId);
     return;
   }
+  if (activeRoomId && previousRole && previousRole !== currentRole()) startAnalyticsVisit();
   render();
 }
 window.addEventListener('hashchange', handleRouteChange);
