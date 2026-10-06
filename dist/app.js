@@ -47,6 +47,7 @@ let displayVisualizerFrame = null;
 let displayTransitionTimer = null;
 let displayTransitionActive = false;
 let displayVideoError = false;
+let displayAudioActivated = false;
 let youtubePreflightPlayer = null;
 let youtubePreflightTimer = null;
 let youtubePreflightRequestId = 0;
@@ -645,9 +646,6 @@ function speakDisplayTransition(current) {
         showAudioActivation();
         settlePhrase();
       }, Math.min(SPEECH_PHRASE_MAX_WAIT_MS, Math.max(4000, phrase.text.length * 110)));
-      utterance.onstart = () => {
-        if (!localStorage.getItem('muxo-audio-enabled')) showAudioActivation();
-      };
       utterance.onend = settlePhrase;
       utterance.onerror = settlePhrase;
       window.speechSynthesis.speak(utterance);
@@ -682,19 +680,19 @@ function hideDisplayVideoError() {
   if (errorOverlay) errorOverlay.hidden = true;
 }
 function showAudioActivation() {
-  if (localStorage.getItem('muxo-audio-enabled') === 'true') return;
+  if (displayAudioActivated) return;
   const overlay = document.querySelector('#audio-activation');
   if (!overlay) return;
   overlay.hidden = false;
   const button = overlay.querySelector('#activate-audio');
   if (button) button.onclick = () => {
+    displayAudioActivated = true;
     displayPlayer?.unMute?.();
     syncDisplayVolume();
     window.speechSynthesis?.resume();
     startTransitionAmbientAudio();
     postYoutubeCommand('playVideo');
     overlay.hidden = true;
-    localStorage.setItem('muxo-audio-enabled', 'true');
   };
 }
 function ensureDisplayPlayback() {
