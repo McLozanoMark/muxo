@@ -231,10 +231,12 @@ a { color: inherit; text-decoration: none; }
 @keyframes idle-spotlight-pulse { from { opacity: .78; } to { opacity: 1; } }
 @keyframes idle-beam-sweep { from { rotate: -4deg; opacity: .28; } to { rotate: 4deg; opacity: .7; } }
 @media (prefers-reduced-motion: reduce) { .idle-spotlight, .idle-spotlight::before { animation: none; } }
-.display-transition { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 40%, #32183dd9 0, #050307f5 62%), #050307f5; }
+.display-transition { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: linear-gradient(180deg, #05030755 0, #050307b8 100%), url('./muxo-idle-background.png') center / cover no-repeat; }
 .display-transition[hidden] { display: none; }
-.display-video-error { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 42%, #32183df2 0, #050307f8 64%), #050307f8; }
+.display-video-error { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; padding: 24px; background: linear-gradient(180deg, #05030755 0, #050307d0 100%), url('./muxo-idle-background.png') center / cover no-repeat; }
 .display-video-error[hidden] { display: none; }
+.display-transition > .idle-stage-atmosphere, .display-video-error > .idle-stage-atmosphere { z-index: 0; }
+.transition-card, .display-video-error-card { position: relative; z-index: 4; }
 .display-video-error-card { width: min(680px, 88vw); padding: 38px 24px; text-align: center; }
 .display-error-logo { display: inline-flex; align-items: center; justify-content: center; }
 .error-logo { width: min(380px, 72vw); }
