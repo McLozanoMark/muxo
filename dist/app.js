@@ -99,6 +99,10 @@ function clientDeviceId() {
   return value;
 }
 function currentRole() { return ['waiter', 'operator', 'display'].includes(route()) ? route() : 'waiter'; }
+function updateDocumentTitle() {
+  const songTitle = String(state.nowPlaying?.songTitle ?? '').trim();
+  document.title = songTitle ? `${songTitle} · Muxo` : 'Muxo Karaoke';
+}
 function roleLabel(role = currentRole()) { return role === 'operator' ? 'encargado' : role === 'display' ? 'pantalla TV' : 'mesero'; }
 function id() { return crypto.randomUUID?.() || `muxo-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function notify(message) { const node = document.createElement('div'); node.className = 'toast'; node.textContent = message; document.body.append(node); setTimeout(() => node.remove(), 2600); }
@@ -572,6 +576,7 @@ async function startRoomSession(roomId) {
       if (roomId !== activeRoomId || !next.exists() || !nextRoomState) return;
       state = nextRoomState;
       localStorage.setItem(localSessionKey(), JSON.stringify(state));
+      updateDocumentTitle();
       if (route() === 'waiter' && updateWaiterInPlace()) return;
       render();
     }, () => notify('La conexión en vivo de esta sala se interrumpió.'));
@@ -1016,6 +1021,7 @@ function bindRoomAccess() {
   });
 }
 function render() {
+  updateDocumentTitle();
   const currentRoute = route();
   if (!activeRoomId) {
     stopPlaybackTelemetry();
