@@ -9,18 +9,23 @@ const COMMERCIAL_AUDIO_URL = './muxo-commercial.m4a';
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_ID_LENGTH = 6;
 const MAX_TABLES = 20;
+const MAX_SINGER_SUGGESTIONS = 24;
 const OPERATOR_LEASE_MS = 45000;
 const OPERATOR_HEARTBEAT_MS = 10000;
 const freshSession = () => emptyRoomSession();
-const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
+const emptyRoomSession = () => ({ nowPlaying: null, queue: [], recent: [], singerSuggestions: {}, playback: { volume: 100, position: 0, duration: 0, videoId: null, command: null } });
 const app = document.querySelector('#app');
 let state = freshSession();
 let selectedSong = null;
 let selectedTableNumber = '';
 let selectedSingerName = '';
+let singerSuggestionQuery = '';
+let showAllSingerSuggestions = false;
+let manageSingerSuggestions = false;
 let searchState = { query: '', mode: 'recommendations', channelId: null, pageSize: 10, page: 1, nextPageToken: null, prevPageToken: null, totalResults: 0, results: [] };
 let recommendationsLoading = false;
 let saveTimer = null;
+const singerMemorySaveTimers = new Map();
 let firebaseDb = null;
 let firebaseReady = false;
 let sessionUnsubscribe = null;
@@ -75,6 +80,83 @@ function roomIdFromLocation() {
 }
 function roomHref(role) { return `#${role}${activeRoomId ? `?room=${encodeURIComponent(activeRoomId)}` : ''}`; }
 function localSessionKey(roomId = activeRoomId) { return `${localKey}-${roomId || 'local'}`; }
+function localSingerMemoryKey(roomId = activeRoomId) { return `${localKey}-singers-${roomId || 'local'}`; }
+function tableMemoryKey(value) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= MAX_TABLES ? String(numeric) : '';
+}
+function normalizeSingerName(value) { return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 60); }
+function singerNameKey(value) { return normalizeSingerName(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-PE'); }
+function readLocalSingerSuggestions(roomId = activeRoomId) {
+  try { return JSON.parse(localStorage.getItem(localSingerMemoryKey(roomId)) || '{}') || {}; } catch { return {}; }
+}
+function persistLocalSingerSuggestions(suggestions, roomId = activeRoomId) {
+  try { localStorage.setItem(localSingerMemoryKey(roomId), JSON.stringify(suggestions)); } catch (error) { console.warn('No se pudo guardar la memoria local de cantantes.', error); }
+}
+function mergeSingerSuggestionMaps(...maps) {
+  const merged = {};
+  maps.forEach((map) => {
+    Object.entries(map || {}).forEach(([table, values]) => {
+      const tableKey = tableMemoryKey(table);
+      if (!tableKey || !Array.isArray(values)) return;
+      const tableSuggestions = merged[tableKey] || [];
+      values.forEach((item) => {
+        const name = normalizeSingerName(typeof item === 'string' ? item : item?.name);
+        const key = singerNameKey(name);
+        if (!name || !key) return;
+        const existing = tableSuggestions.find((suggestion) => singerNameKey(suggestion.name) === key);
+        const usageCount = Math.max(1, Number(typeof item === 'string' ? 1 : item?.usageCount) || 1);
+        const updatedAt = Number(typeof item === 'string' ? 0 : item?.updatedAt) || 0;
+        if (existing) {
+          existing.usageCount = Math.max(existing.usageCount, usageCount);
+          existing.updatedAt = Math.max(existing.updatedAt, updatedAt);
+        } else {
+          tableSuggestions.push({ name, usageCount, updatedAt });
+        }
+      });
+      merged[tableKey] = tableSuggestions;
+    });
+  });
+  return merged;
+}
+function singerSuggestionMap() {
+  const remote = state.singerSuggestions;
+  const local = readLocalSingerSuggestions();
+  if (!firebaseReady || !remote) return mergeSingerSuggestionMaps(remote, local);
+  const localFallback = Object.fromEntries(Object.entries(local).filter(([table]) => !Object.prototype.hasOwnProperty.call(remote, table)));
+  return mergeSingerSuggestionMaps(remote, localFallback);
+}
+function singerSuggestionsForTable(tableNumber) {
+  const tableKey = tableMemoryKey(tableNumber);
+  if (!tableKey) return [];
+  return [...(singerSuggestionMap()[tableKey] || [])].sort((first, second) => Number(second.usageCount) - Number(first.usageCount) || Number(second.updatedAt) - Number(first.updatedAt) || first.name.localeCompare(second.name, 'es'));
+}
+function scheduleSingerMemorySync(tableNumber, suggestions) {
+  const roomId = activeRoomId;
+  const tableKey = tableMemoryKey(tableNumber);
+  if (!roomId || !tableKey) return;
+  clearTimeout(singerMemorySaveTimers.get(tableKey));
+  const timer = setTimeout(async () => {
+    singerMemorySaveTimers.delete(tableKey);
+    if (!firebaseReady || roomId !== activeRoomId) return;
+    try {
+      await updateDoc(sessionDocument(), { [`rooms.${roomId}.singerSuggestions.${tableKey}`]: suggestions });
+    } catch (error) {
+      console.error(error);
+      notify('No se pudo sincronizar la memoria de cantantes.');
+    }
+  }, 260);
+  singerMemorySaveTimers.set(tableKey, timer);
+}
+function updateSingerSuggestionsForTable(tableNumber, suggestions) {
+  const tableKey = tableMemoryKey(tableNumber);
+  if (!tableKey) return;
+  const nextMap = { ...singerSuggestionMap(), [tableKey]: suggestions };
+  state = { ...state, singerSuggestions: nextMap };
+  localStorage.setItem(localSessionKey(), JSON.stringify(state));
+  persistLocalSingerSuggestions(nextMap);
+  scheduleSingerMemorySync(tableKey, suggestions);
+}
 function normalizeRoomId(value) { return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_ID_LENGTH); }
 function generateRoomId() { return Array.from({ length: ROOM_ID_LENGTH }, () => ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]).join(''); }
 function deviceMode() { return localStorage.getItem(deviceModeKey); }
@@ -722,7 +804,13 @@ function save(next) {
   saveTimer = setTimeout(async () => {
     if (!firebaseReady || !activeRoomId) return;
     try {
-      await updateDoc(sessionDocument(), { [`rooms.${activeRoomId}`]: { ...state, updatedAt: Date.now() } });
+      await updateDoc(sessionDocument(), {
+        [`rooms.${activeRoomId}.nowPlaying`]: state.nowPlaying,
+        [`rooms.${activeRoomId}.queue`]: state.queue,
+        [`rooms.${activeRoomId}.recent`]: state.recent,
+        [`rooms.${activeRoomId}.playback`]: state.playback,
+        [`rooms.${activeRoomId}.updatedAt`]: Date.now(),
+      });
     } catch (error) {
       console.error(error);
       notify('No se pudo sincronizar el cambio con Firebase.');
@@ -803,17 +891,82 @@ function tableOptionsMarkup() {
     return `<button type="button" class="table-choice ${selectedTableNumber === String(index + 1) ? 'selected' : ''}" data-table="${index + 1}">${tableNumber}</button>`;
   }).join('');
 }
-function syncSelectionModal() {
-  document.querySelectorAll('.table-choice').forEach((button) => button.classList.toggle('selected', button.dataset.table === selectedTableNumber));
-  const label = document.querySelector('#selected-table-label');
-  if (label) label.textContent = selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa';
-  const addButton = document.querySelector('#add-button');
-  if (addButton) addButton.disabled = !selectedTableNumber || !selectedSong || ['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
+function singerSuggestionListMarkup() {
+  const suggestions = singerSuggestionsForTable(selectedTableNumber);
+  if (!suggestions.length) return '<div class="singer-memory-empty">Todavía no hay nombres guardados para esta mesa.</div>';
+  const query = singerNameKey(singerSuggestionQuery);
+  const filtered = (showAllSingerSuggestions ? suggestions : suggestions.slice(0, 6)).filter((suggestion) => !query || singerNameKey(suggestion.name).includes(query));
+  if (!filtered.length) return '<div class="singer-memory-empty">No encontramos ese nombre en esta mesa.</div>';
+  return filtered.map((suggestion) => `<div class="singer-suggestion-row"><button type="button" class="singer-suggestion" data-singer-name="${escapeHtml(suggestion.name)}">${icon('person')}<span>${escapeHtml(suggestion.name)}</span></button>${manageSingerSuggestions ? `<button type="button" class="singer-suggestion-remove" data-singer-remove="${escapeHtml(suggestion.name)}" aria-label="Quitar ${escapeHtml(suggestion.name)}">${icon('close')}</button>` : ''}</div>`).join('');
+}
+function singerSuggestionPanelMarkup() {
+  if (!selectedTableNumber) return '<div class="singer-memory-panel" id="singer-suggestions-panel"><div class="singer-memory-empty">Selecciona una mesa para ver sus cantantes frecuentes.</div></div>';
+  const suggestions = singerSuggestionsForTable(selectedTableNumber);
+  const canExpand = suggestions.length > 6;
+  return `<div class="singer-memory-panel" id="singer-suggestions-panel"><div class="singer-memory-head"><div><div class="eyebrow">MEMORIA DE LA MESA</div><span>Elige un cantante guardado</span></div><div class="singer-memory-actions">${canExpand ? `<button type="button" class="singer-memory-action" id="toggle-singer-suggestions">${showAllSingerSuggestions ? 'Mostrar menos' : `Ver todos (${suggestions.length})`}</button>` : ''}${suggestions.length ? `<button type="button" class="singer-memory-action" id="manage-singer-suggestions">${manageSingerSuggestions ? 'Listo' : 'Gestionar'}</button>` : ''}</div></div>${showAllSingerSuggestions && suggestions.length ? '<input id="singer-suggestion-search" class="input singer-memory-search" placeholder="Buscar un nombre guardado…" autocomplete="off"/>' : ''}<div class="singer-suggestion-list" id="singer-suggestion-list">${singerSuggestionListMarkup()}</div>${manageSingerSuggestions && suggestions.length ? `<button type="button" class="singer-memory-clear" id="clear-singer-suggestions">${icon('delete_sweep')}Limpiar nombres de esta mesa</button>` : ''}</div>`;
+}
+function bindSingerSuggestionButtons() {
+  const panel = document.querySelector('#singer-suggestions-panel');
+  if (!panel) return;
+  panel.querySelectorAll('.singer-suggestion').forEach((button) => button.addEventListener('click', () => {
+    selectedSingerName = button.dataset.singerName || '';
+    const input = document.querySelector('#singer-input');
+    if (input) { input.value = selectedSingerName; input.focus(); }
+  }));
+  panel.querySelectorAll('[data-singer-remove]').forEach((button) => button.addEventListener('click', () => removeSingerSuggestion(selectedTableNumber, button.dataset.singerRemove)));
+}
+function bindSingerSuggestionControls() {
+  const panel = document.querySelector('#singer-suggestions-panel');
+  if (!panel) return;
+  bindSingerSuggestionButtons();
+  panel.querySelector('#toggle-singer-suggestions')?.addEventListener('click', () => { showAllSingerSuggestions = !showAllSingerSuggestions; singerSuggestionQuery = ''; renderSingerSuggestionPanel(); });
+  panel.querySelector('#manage-singer-suggestions')?.addEventListener('click', () => { manageSingerSuggestions = !manageSingerSuggestions; renderSingerSuggestionPanel(); });
+  panel.querySelector('#clear-singer-suggestions')?.addEventListener('click', () => clearSingerSuggestions(selectedTableNumber));
+  panel.querySelector('#singer-suggestion-search')?.addEventListener('input', (event) => { singerSuggestionQuery = event.target.value; renderSingerSuggestionList(); });
+}
+function renderSingerSuggestionList() {
+  const list = document.querySelector('#singer-suggestion-list');
+  if (!list) return;
+  list.innerHTML = singerSuggestionListMarkup();
+  bindSingerSuggestionButtons();
+}
+function renderSingerSuggestionPanel() {
+  const panel = document.querySelector('#singer-suggestions-panel');
+  if (!panel) return;
+  panel.outerHTML = singerSuggestionPanelMarkup();
+  bindSingerSuggestionControls();
+}
+function rememberSingerForTable(tableNumber, singerName) {
+  const name = normalizeSingerName(singerName);
+  const tableKey = tableMemoryKey(tableNumber);
+  if (!name || singerNameKey(name) === singerNameKey('Invitado') || !tableKey) return;
+  const suggestions = singerSuggestionsForTable(tableKey);
+  const existing = suggestions.find((suggestion) => singerNameKey(suggestion.name) === singerNameKey(name));
+  const nextSuggestions = existing
+    ? suggestions.map((suggestion) => suggestion.name === existing.name ? { ...suggestion, usageCount: suggestion.usageCount + 1, updatedAt: Date.now() } : suggestion)
+    : [{ name, usageCount: 1, updatedAt: Date.now() }, ...suggestions].slice(0, MAX_SINGER_SUGGESTIONS);
+  updateSingerSuggestionsForTable(tableKey, nextSuggestions);
+}
+function removeSingerSuggestion(tableNumber, singerName) {
+  const nameKey = singerNameKey(singerName);
+  const nextSuggestions = singerSuggestionsForTable(tableNumber).filter((suggestion) => singerNameKey(suggestion.name) !== nameKey);
+  updateSingerSuggestionsForTable(tableNumber, nextSuggestions);
+  renderSingerSuggestionPanel();
+}
+function clearSingerSuggestions(tableNumber) {
+  updateSingerSuggestionsForTable(tableNumber, []);
+  showAllSingerSuggestions = false;
+  manageSingerSuggestions = false;
+  singerSuggestionQuery = '';
+  renderSingerSuggestionPanel();
 }
 function closeSongSelection() {
   selectedSong = null;
   selectedTableNumber = '';
   selectedSingerName = '';
+  singerSuggestionQuery = '';
+  showAllSingerSuggestions = false;
+  manageSingerSuggestions = false;
   youtubePreflightRequestId += 1;
   destroyYoutubePreflight();
   renderSelection();
@@ -822,6 +975,9 @@ function openSongModal(song) {
   selectedSong = { ...song, availabilityStatus: 'checking', availabilityMessage: '', durationLabel: 'Consultando duración…' };
   selectedTableNumber = '';
   selectedSingerName = '';
+  singerSuggestionQuery = '';
+  showAllSingerSuggestions = false;
+  manageSingerSuggestions = false;
   renderSelection();
   validateSongForDisplay(song);
   youtubeRequest('videos', { part: 'contentDetails', id: song.id, key: YOUTUBE_API_KEY })
@@ -861,7 +1017,7 @@ function renderSelection() {
   }
   const canAddSong = selectedTableNumber && !['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
   const addLabel = selectedSong.availabilityStatus === 'unknown' ? 'Agregar sin validar' : 'Agregar a la cola';
-  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/>${singerSuggestionPanelMarkup()}<button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
     closeSongSelection();
@@ -870,7 +1026,8 @@ function renderSelection() {
   requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #close-song-modal')?.focus());
   node.querySelector('#close-song-modal')?.addEventListener('click', closeSongSelection);
   node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') closeSongSelection(); });
-  node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; syncSelectionModal(); }));
+  bindSingerSuggestionControls();
+  node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; selectedSingerName = ''; singerSuggestionQuery = ''; showAllSingerSuggestions = false; manageSingerSuggestions = false; renderSelection(); }));
   node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
   node.querySelector('#add-button')?.addEventListener('click', () => {
     if (selectedSong.availabilityStatus === 'checking') return notify('Espera la verificación de YouTube.');
@@ -880,6 +1037,7 @@ function renderSelection() {
     const numericTable = Number(tableNumber);
     if (!Number.isInteger(numericTable) || numericTable < 1 || numericTable > MAX_TABLES) return notify(`Selecciona una mesa del 01 al ${String(MAX_TABLES).padStart(2, '0')}.`);
     const singerName = selectedSingerName.trim() || 'Invitado';
+    rememberSingerForTable(tableNumber, singerName);
     save({ ...state, queue: [...state.queue, { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() }] });
     closeSongSelection();
     notify('Canción agregada a la cola.');
@@ -1105,6 +1263,7 @@ function updateWaiterInPlace() {
   if (queueCount) queueCount.textContent = state.queue.length;
   const badge = document.querySelector('.page-head .badge');
   if (badge) badge.innerHTML = `${icon('queue_music')}${state.queue.length} en cola`;
+  if (selectedSong && selectedTableNumber) renderSingerSuggestionPanel();
   return true;
 }
 function bindRoomAccess() {
