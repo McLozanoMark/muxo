@@ -170,6 +170,10 @@ function songAvailabilityMarkup(song) {
   }[status] || { icon: 'help', label: 'No se pudo verificar; se comprobará al reproducir.' };
   return `<div class="song-availability ${escapeHtml(status)}" role="status" aria-live="polite">${icon(config.icon)}<span>${escapeHtml(config.label)}</span></div>`;
 }
+function unavailableSongModalMarkup(song) {
+  const message = song.availabilityMessage || 'Esta versión no se puede reproducir en la pantalla.';
+  return `<div class="modal-backdrop song-unavailable-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-unavailable-title"><section class="song-unavailable-modal card"><div class="song-unavailable-glow" aria-hidden="true"><span class="song-unavailable-orb">${icon('play_disabled')}</span></div><div class="song-unavailable-brand">${logoMarkup('song-unavailable-logo')}</div><div class="eyebrow">MUXO · PANTALLA</div><h2 id="song-unavailable-title">Esta versión no puede reproducirse</h2><p>${escapeHtml(message)}</p><div class="song-unavailable-hint">Elige otra versión para que el show continúe sin interrupciones.</div><button id="dismiss-song-error" class="button">${icon('check')}Entendido</button></section></div>`;
+}
 async function validateSongForDisplay(song) {
   const requestId = ++youtubePreflightRequestId;
   destroyYoutubePreflight();
@@ -804,6 +808,14 @@ function syncSelectionModal() {
   const addButton = document.querySelector('#add-button');
   if (addButton) addButton.disabled = !selectedTableNumber || !selectedSong || ['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
 }
+function closeSongSelection() {
+  selectedSong = null;
+  selectedTableNumber = '';
+  selectedSingerName = '';
+  youtubePreflightRequestId += 1;
+  destroyYoutubePreflight();
+  renderSelection();
+}
 function openSongModal(song) {
   selectedSong = { ...song, availabilityStatus: 'checking', availabilityMessage: '', durationLabel: 'Consultando duración…' };
   selectedTableNumber = '';
@@ -829,21 +841,25 @@ function renderSelection() {
   document.removeEventListener('keydown', selectionKeydownHandler);
   selectionKeydownHandler = null;
   if (!selectedSong) { destroyYoutubePreflight(); node.innerHTML = ''; return; }
+  if (selectedSong.availabilityStatus === 'unavailable') {
+    node.innerHTML = unavailableSongModalMarkup(selectedSong);
+    selectionKeydownHandler = (event) => { if (event.key === 'Escape') closeSongSelection(); };
+    document.addEventListener('keydown', selectionKeydownHandler);
+    node.querySelector('#dismiss-song-error')?.addEventListener('click', closeSongSelection);
+    requestAnimationFrame(() => node.querySelector('#dismiss-song-error')?.focus());
+    return;
+  }
   const canAddSong = selectedTableNumber && !['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
   const addLabel = selectedSong.availabilityStatus === 'unknown' ? 'Agregar sin validar' : 'Agregar a la cola';
   node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
-    selectedSong = null;
-    youtubePreflightRequestId += 1;
-    destroyYoutubePreflight();
-    renderSelection();
+    closeSongSelection();
   };
   document.addEventListener('keydown', selectionKeydownHandler);
   requestAnimationFrame(() => document.querySelector('#song-modal .table-choice, #song-modal #close-song-modal')?.focus());
-  const closeSongModal = () => { selectedSong = null; youtubePreflightRequestId += 1; destroyYoutubePreflight(); renderSelection(); };
-  node.querySelector('#close-song-modal')?.addEventListener('click', closeSongModal);
-  node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') closeSongModal(); });
+  node.querySelector('#close-song-modal')?.addEventListener('click', closeSongSelection);
+  node.querySelector('#song-modal')?.addEventListener('click', (event) => { if (event.target.id === 'song-modal') closeSongSelection(); });
   node.querySelectorAll('.table-choice').forEach((button) => button.addEventListener('click', () => { selectedTableNumber = button.dataset.table; syncSelectionModal(); }));
   node.querySelector('#singer-input')?.addEventListener('input', (event) => { selectedSingerName = event.target.value; });
   node.querySelector('#add-button')?.addEventListener('click', () => {
@@ -855,12 +871,7 @@ function renderSelection() {
     if (!Number.isInteger(numericTable) || numericTable < 1 || numericTable > MAX_TABLES) return notify(`Selecciona una mesa del 01 al ${String(MAX_TABLES).padStart(2, '0')}.`);
     const singerName = selectedSingerName.trim() || 'Invitado';
     save({ ...state, queue: [...state.queue, { id: id(), tableNumber, singerName, songTitle: selectedSong.title, youtubeVideoId: selectedSong.id, thumbnail: selectedSong.thumbnail, channelTitle: selectedSong.channelTitle, status: 'queued', createdAt: Date.now() }] });
-    selectedSong = null;
-    selectedTableNumber = '';
-    selectedSingerName = '';
-    youtubePreflightRequestId += 1;
-    destroyYoutubePreflight();
-    renderSelection();
+    closeSongSelection();
     notify('Canción agregada a la cola.');
   });
 }
