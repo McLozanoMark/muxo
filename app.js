@@ -758,7 +758,6 @@ function youtubeSearchItemToSong(item, isPriority = false) {
   return {
     id: videoId,
     title: snippet.title ?? 'Video sin título',
-    description: snippet.description ?? '',
     channelTitle: snippet.channelTitle ?? '',
     thumbnail: snippet.thumbnails?.medium?.url ?? snippet.thumbnails?.default?.url ?? '',
     isPriority,
@@ -825,11 +824,11 @@ function openSongModal(song) {
   selectedSingerName = '';
   renderSelection();
   validateSongForDisplay(song);
-  youtubeRequest('videos', { part: 'contentDetails,snippet', id: song.id, key: YOUTUBE_API_KEY })
+  youtubeRequest('videos', { part: 'contentDetails', id: song.id, key: YOUTUBE_API_KEY })
     .then((data) => {
       const details = data.items?.[0];
       if (!details || selectedSong?.id !== song.id) return;
-      selectedSong = { ...selectedSong, durationLabel: formatIsoDuration(details.contentDetails?.duration), description: details.snippet?.description || selectedSong.description };
+      selectedSong = { ...selectedSong, durationLabel: formatIsoDuration(details.contentDetails?.duration) };
       renderSelection();
     })
     .catch(() => {
@@ -862,7 +861,7 @@ function renderSelection() {
   }
   const canAddSong = selectedTableNumber && !['checking', 'unavailable'].includes(selectedSong.availabilityStatus);
   const addLabel = selectedSong.availabilityStatus === 'unknown' ? 'Agregar sin validar' : 'Agregar a la cola';
-  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><p class="song-description">${escapeHtml(selectedSong.description || 'Sin descripción disponible.')}</p><button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
+  node.innerHTML = `<div class="modal-backdrop" id="song-modal" role="dialog" aria-modal="true" aria-labelledby="song-modal-title"><section class="song-modal card"><button id="close-song-modal" class="icon-button modal-close" aria-label="Cerrar selección">${icon('close')}</button><div class="song-modal-head"><img src="${escapeHtml(selectedSong.thumbnail)}" alt=""/><div><div class="eyebrow">CANCIÓN ELEGIDA</div><h2 id="song-modal-title">${escapeHtml(selectedSong.title)}</h2><div class="song-channel">${escapeHtml(selectedSong.channelTitle)}</div><div class="song-modal-duration">${escapeHtml(selectedSong.durationLabel || 'Duración no disponible')}</div>${songAvailabilityMarkup(selectedSong)}</div></div><div class="song-modal-body"><div class="table-picker"><div class="modal-section-head"><div><div class="eyebrow">ASIGNA LA MESA</div><h3>Selecciona una mesa · 01–20</h3></div><span id="selected-table-label" class="table-status">${selectedTableNumber ? `Mesa ${formatSelectedTable(selectedTableNumber)}` : 'Elige una mesa'}</span></div><div class="table-grid">${tableOptionsMarkup()}</div></div><div class="singer-picker"><div class="eyebrow">DATOS DEL TURNO</div><h3>¿Quién va a cantar?</h3><input id="singer-input" class="input" placeholder="Nombre del cantante (opcional)" value="${escapeHtml(selectedSingerName)}"/><button id="add-button" class="button" ${canAddSong ? '' : 'disabled'}>${icon('playlist_add')}${addLabel}</button></div></div></section></div>`;
   selectionKeydownHandler = (event) => {
     if (event.key !== 'Escape') return;
     closeSongSelection();
